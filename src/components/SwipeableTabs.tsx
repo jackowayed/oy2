@@ -18,6 +18,10 @@ const PULL_K = 0.4;
 const SHOW_INDICATOR_THRESHOLD = 50;
 const TRIGGER_THRESHOLD = 100;
 const LOADING_OFFSET = 48;
+// Minimum movement before committing to an axis. Without this, tiny
+// initial finger jitter can lock the gesture into "x" and block native
+// vertical scroll for the entire touch.
+const AXIS_DECISION_THRESHOLD = 8;
 
 function appr(x: number) {
 	return PULL_MAX * (1 - Math.exp((-PULL_K * x) / PULL_MAX));
@@ -134,8 +138,12 @@ export function SwipeableTabs(props: SwipeableTabsProps) {
 	) => {
 		// Determine axis on first significant movement
 		if (!axis) {
-			const dominated = Math.abs(deltaX) > Math.abs(deltaY);
-			if (dominated) {
+			const absX = Math.abs(deltaX);
+			const absY = Math.abs(deltaY);
+			if (Math.max(absX, absY) < AXIS_DECISION_THRESHOLD) {
+				return;
+			}
+			if (absX > absY) {
 				axis = "x";
 			} else if (deltaY > 0 && isAtTop() && canRefresh() && !isRefreshing()) {
 				// Pulling down while at top - enter pull mode
