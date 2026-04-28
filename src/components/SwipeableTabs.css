@@ -8,6 +8,8 @@
 }
 
 .swipeable-tabs {
+	display: flex;
+	flex-direction: column;
 	flex: 1;
 	min-height: 0;
 	transition: transform 0.2s ease;
@@ -23,9 +25,7 @@
 }
 
 .swipeable-tabs-scroll {
-	display: flex;
 	flex: 1;
-	flex-direction: column;
 	min-height: 0;
 	overflow-y: auto;
 	overscroll-behavior-y: contain;
