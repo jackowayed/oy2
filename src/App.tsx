@@ -1512,6 +1512,9 @@ export default function App(props: AppProps) {
 					});
 				},
 			});
+			if (currentUser()) {
+				void refreshWithoutAnimation();
+			}
 		};
 
 		navigator.serviceWorker.addEventListener("message", onMessage);
