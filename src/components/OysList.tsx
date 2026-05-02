@@ -3,7 +3,12 @@ import { Geolocation as CapacitorGeolocation } from "@capacitor/geolocation";
 import { Button } from "@kobalte/core/button";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { Oy, OyPayload } from "../types";
-import { calculateDistance, formatTime, onAppVisible } from "../utils";
+import {
+	calculateDistance,
+	formatTime,
+	onAppVisible,
+	openMapsDeepLink,
+} from "../utils";
 import { LocationMap } from "./LocationMap";
 import "./OysList.css";
 
@@ -177,7 +182,15 @@ export function OysList(props: OysListProps) {
 										</Show>
 									</div>
 									<Show when={isLocation}>
-										<div class="oys-list-item-map-slot">
+										{/* biome-ignore lint/a11y/noStaticElementInteractions: nested inside the parent oy card button */}
+										{/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation toggles the panel via the parent oy card button */}
+										<div
+											class="oys-list-item-map-slot"
+											onClick={(event) => {
+												event.stopPropagation();
+												openMapsDeepLink(payload.lat, payload.lon);
+											}}
+										>
 											<div
 												class={`oys-location-panel${isOpen() ? " open" : ""}`}
 											>

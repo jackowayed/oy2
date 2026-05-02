@@ -79,3 +79,19 @@ export function calculateDistance(
 function deg2rad(deg: number) {
 	return deg * (Math.PI / 180);
 }
+
+export function buildMapsDeepLink(lat: number, lon: number): string {
+	const platform = Capacitor.getPlatform();
+	if (platform === "ios") {
+		return `maps://?ll=${lat},${lon}&q=${lat},${lon}`;
+	}
+	if (platform === "android") {
+		return `geo:${lat},${lon}?q=${lat},${lon}`;
+	}
+	return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+}
+
+export function openMapsDeepLink(lat: number, lon: number): void {
+	const url = buildMapsDeepLink(lat, lon);
+	window.open(url, "_blank", "noopener,noreferrer");
+}
