@@ -3,8 +3,12 @@ import type {
 	RegistrationResponseJSON,
 	WebAuthnCredential,
 } from "@simplewebauthn/server";
-import { setCookie } from "hono/cookie";
-import { authUserPayload, createSession, updateLastSeen } from "../lib";
+import {
+	authUserPayload,
+	createSession,
+	setAuthCookies,
+	updateLastSeen,
+} from "../lib";
 import type { App, AppContext, Passkey, User } from "../types";
 
 const CHALLENGE_PREFIX = "webauthn_challenge:";
@@ -53,16 +57,6 @@ function getPrimaryOrigin(c: AppContext): string {
 
 function getRpId(c: AppContext): string {
 	return c.env.WEBAUTHN_RP_ID || new URL(getPrimaryOrigin(c)).hostname;
-}
-
-function setSessionCookie(c: AppContext, token: string) {
-	setCookie(c, "session", token, {
-		httpOnly: true,
-		secure: true,
-		sameSite: "Strict",
-		path: "/",
-		maxAge: 60 * 60 * 24 * 365,
-	});
 }
 
 function base64UrlToUint8Array(value: string): Uint8Array {
@@ -295,7 +289,7 @@ export function registerPasskeyRoutes(app: App) {
 
 		// Create session
 		const sessionToken = await createSession(c, user);
-		setSessionCookie(c, sessionToken);
+		setAuthCookies(c, sessionToken, user);
 		c.executionCtx.waitUntil(
 			c
 				.get("db")

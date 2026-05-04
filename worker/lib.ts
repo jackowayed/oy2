@@ -1,3 +1,4 @@
+import { setCookie } from "hono/cookie";
 import { sendNativePushNotification, sendPushNotification } from "./push";
 import type {
 	AppContext,
@@ -10,6 +11,23 @@ import type {
 const PUSH_MAX_ATTEMPTS = 3;
 const PUSH_BACKOFF_MS = 250;
 const PUSH_BACKOFF_MULTIPLIER = 2;
+const AUTH_JWT_TTL_SECONDS = 60 * 60 * 24 * 7;
+const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+type AuthJwtPayload = {
+	sub: string;
+	sid: string;
+	username: string;
+	email: string | null;
+	admin?: true;
+	iat: number;
+	exp: number;
+};
+
+type VerifyAuthJwtResult =
+	| { status: "valid"; payload: AuthJwtPayload }
+	| { status: "expired"; payload: AuthJwtPayload }
+	| { status: "invalid" };
 
 type PushAttempt = {
 	endpoint: string;
@@ -30,6 +48,152 @@ const delay = (ms: number) =>
 	new Promise((resolve) => {
 		setTimeout(resolve, ms);
 	});
+
+function base64UrlEncode(value: Uint8Array) {
+	let binary = "";
+	for (const byte of value) {
+		binary += String.fromCharCode(byte);
+	}
+	return btoa(binary)
+		.replace(/\+/g, "-")
+		.replace(/\//g, "_")
+		.replace(/=+$/, "");
+}
+
+function base64UrlDecode(value: string) {
+	const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+	const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+	const binary = atob(base64 + padding);
+	return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function base64UrlEncodeJson(value: unknown) {
+	return base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function base64UrlDecodeJson<T>(value: string): T {
+	return JSON.parse(new TextDecoder().decode(base64UrlDecode(value))) as T;
+}
+
+async function importJwtKey(secret: string) {
+	return crypto.subtle.importKey(
+		"raw",
+		new TextEncoder().encode(secret),
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign", "verify"],
+	);
+}
+
+async function signJwtInput(c: AppContext, input: string) {
+	const key = await importJwtKey(c.env.JWT_SECRET);
+	const signature = await crypto.subtle.sign(
+		"HMAC",
+		key,
+		new TextEncoder().encode(input),
+	);
+	return base64UrlEncode(new Uint8Array(signature));
+}
+
+function timingSafeEqual(a: string, b: string) {
+	if (a.length !== b.length) {
+		return false;
+	}
+	let mismatch = 0;
+	for (let i = 0; i < a.length; i += 1) {
+		mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+	}
+	return mismatch === 0;
+}
+
+function authJwtPayload(
+	user: User,
+	sessionId: string,
+	options: { expiresAt?: number } = {},
+): AuthJwtPayload {
+	const now = Math.floor(Date.now() / 1000);
+	return {
+		sub: String(user.id),
+		sid: sessionId,
+		username: user.username,
+		email: user.email ?? null,
+		...(user.admin ? { admin: true as const } : {}),
+		iat: now,
+		exp: options.expiresAt ?? now + AUTH_JWT_TTL_SECONDS,
+	};
+}
+
+export function userFromAuthJwtPayload(payload: AuthJwtPayload): User {
+	return {
+		id: Number(payload.sub),
+		username: payload.username,
+		email: payload.email,
+		admin: payload.admin ? 1 : null,
+	};
+}
+
+export async function signAuthJwt(
+	c: AppContext,
+	user: User,
+	sessionId: string,
+	options: { expiresAt?: number } = {},
+) {
+	const header = base64UrlEncodeJson({ alg: "HS256", typ: "JWT" });
+	const payload = base64UrlEncodeJson(authJwtPayload(user, sessionId, options));
+	const input = `${header}.${payload}`;
+	return `${input}.${await signJwtInput(c, input)}`;
+}
+
+export async function verifyAuthJwt(
+	c: AppContext,
+	token: string,
+): Promise<VerifyAuthJwtResult> {
+	try {
+		const parts = token.split(".");
+		if (parts.length !== 3) {
+			return { status: "invalid" };
+		}
+		const [header, payload, signature] = parts;
+		const input = `${header}.${payload}`;
+		const expectedSignature = await signJwtInput(c, input);
+		if (!timingSafeEqual(signature, expectedSignature)) {
+			return { status: "invalid" };
+		}
+		const decodedHeader = base64UrlDecodeJson<{ alg?: string; typ?: string }>(
+			header,
+		);
+		if (decodedHeader.alg !== "HS256" || decodedHeader.typ !== "JWT") {
+			return { status: "invalid" };
+		}
+		const decodedPayload = base64UrlDecodeJson<AuthJwtPayload>(payload);
+		if (!decodedPayload.sub || !decodedPayload.sid || !decodedPayload.exp) {
+			return { status: "invalid" };
+		}
+		if (decodedPayload.exp <= Math.floor(Date.now() / 1000)) {
+			return { status: "expired", payload: decodedPayload };
+		}
+		return { status: "valid", payload: decodedPayload };
+	} catch (_err) {
+		return { status: "invalid" };
+	}
+}
+
+export function setAuthCookies(c: AppContext, token: string, user: User) {
+	const cookieOptions = {
+		secure: true,
+		sameSite: "Strict" as const,
+		path: "/",
+		maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
+	};
+	setCookie(c, "session", token, {
+		...cookieOptions,
+		httpOnly: true,
+	});
+	setCookie(c, "auth_user", base64UrlEncodeJson(authUserPayload(user)), {
+		...cookieOptions,
+		httpOnly: false,
+	});
+}
 
 function getStartOfDayNY(date: Date): number {
 	const nyDateStr = date.toLocaleDateString("en-US", {
@@ -395,7 +559,7 @@ export async function createSession(c: AppContext, user: User) {
 			sessionToken,
 			user.id,
 		]);
-	return sessionToken;
+	return signAuthJwt(c, user, sessionToken);
 }
 
 export function updateLastSeen(c: AppContext, userId: number) {
@@ -419,7 +583,7 @@ export async function fetchUserByUsername(
 	return result.rows[0] ?? null;
 }
 
-export function requireAdmin(c: { get: (key: "user") => User | null }) {
+export async function requireAdmin(c: AppContext) {
 	const user = c.get("user");
 	if (!user) {
 		return {
@@ -428,7 +592,12 @@ export function requireAdmin(c: { get: (key: "user") => User | null }) {
 			status: 401 as const,
 		};
 	}
-	if (!user.admin) {
+	const result = await c
+		.get("dbNoCache")
+		.query<{ admin: number | null }>("SELECT admin FROM users WHERE id = $1", [
+			user.id,
+		]);
+	if (!result.rows[0]?.admin) {
 		return {
 			ok: false,
 			response: { error: "Not authorized" },

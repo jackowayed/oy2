@@ -1,5 +1,10 @@
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { authUserPayload, createSession, updateLastSeen } from "../lib";
+import {
+	authUserPayload,
+	createSession,
+	setAuthCookies,
+	updateLastSeen,
+} from "../lib";
 import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
@@ -25,16 +30,6 @@ function getOrigin(c: AppContext): string {
 
 	const url = new URL(c.req.url);
 	return url.origin;
-}
-
-function setSessionCookie(c: AppContext, token: string) {
-	setCookie(c, "session", token, {
-		httpOnly: true,
-		secure: true,
-		sameSite: "Strict",
-		path: "/",
-		maxAge: 60 * 60 * 24 * 365,
-	});
 }
 
 async function generateState(): Promise<string> {
@@ -441,7 +436,7 @@ export function registerOAuthRoutes(app: App) {
 			// Existing user - log them in
 			const user = existingUser.rows[0];
 			const sessionToken = await createSession(c, user);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
 			// Check if they have a passkey
@@ -467,7 +462,7 @@ export function registerOAuthRoutes(app: App) {
 			);
 			if (user) {
 				const sessionToken = await createSession(c, user);
-				setSessionCookie(c, sessionToken);
+				setAuthCookies(c, sessionToken, user);
 				updateLastSeen(c, user.id);
 				return c.redirect("/?passkey_setup=1");
 			}
@@ -569,7 +564,7 @@ export function registerOAuthRoutes(app: App) {
 		if (existingUser.rows[0]) {
 			const user = existingUser.rows[0];
 			const sessionToken = await createSession(c, user);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
 			const passkeys = await c
@@ -594,7 +589,7 @@ export function registerOAuthRoutes(app: App) {
 			);
 			if (user) {
 				const sessionToken = await createSession(c, user);
-				setSessionCookie(c, sessionToken);
+				setAuthCookies(c, sessionToken, user);
 				updateLastSeen(c, user.id);
 				return c.redirect("/?passkey_setup=1");
 			}
@@ -700,7 +695,7 @@ export function registerOAuthRoutes(app: App) {
 
 			// Create session for claimed user
 			const sessionToken = await createSession(c, existingUser);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, existingUser);
 			updateLastSeen(c, existingUser.id);
 
 			return c.json({
@@ -726,7 +721,7 @@ export function registerOAuthRoutes(app: App) {
 
 		// Create session
 		const sessionToken = await createSession(c, user);
-		setSessionCookie(c, sessionToken);
+		setAuthCookies(c, sessionToken, user);
 		updateLastSeen(c, user.id);
 
 		return c.json({
@@ -800,7 +795,7 @@ export function registerOAuthRoutes(app: App) {
 		if (existingUser.rows[0]) {
 			const user = existingUser.rows[0];
 			const sessionToken = await createSession(c, user);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
 			const passkeys = await c
@@ -829,7 +824,7 @@ export function registerOAuthRoutes(app: App) {
 
 			if (user) {
 				const sessionToken = await createSession(c, user);
-				setSessionCookie(c, sessionToken);
+				setAuthCookies(c, sessionToken, user);
 				updateLastSeen(c, user.id);
 				return c.json({
 					user: authUserPayload(user),
@@ -891,7 +886,7 @@ export function registerOAuthRoutes(app: App) {
 		if (existingUser.rows[0]) {
 			const user = existingUser.rows[0];
 			const sessionToken = await createSession(c, user);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
 			const passkeys = await c
@@ -920,7 +915,7 @@ export function registerOAuthRoutes(app: App) {
 
 			if (user) {
 				const sessionToken = await createSession(c, user);
-				setSessionCookie(c, sessionToken);
+				setAuthCookies(c, sessionToken, user);
 				updateLastSeen(c, user.id);
 				return c.json({
 					user: authUserPayload(user),

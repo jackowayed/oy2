@@ -71,7 +71,7 @@ export const request = async (
 };
 
 export const getSessionToken = (res: Response) => {
-	const setCookie = res.headers.get("set-cookie");
+	const setCookie = getSetCookieHeader(res);
 	if (!setCookie) {
 		return null;
 	}
@@ -79,11 +79,25 @@ export const getSessionToken = (res: Response) => {
 	return match ? match[1] : null;
 };
 
+const getSetCookieHeader = (res: Response) => {
+	const headers = res.headers as Headers & { getSetCookie?: () => string[] };
+	const values = headers.getSetCookie?.();
+	if (values?.length) {
+		return values.join(", ");
+	}
+	const entryValues = [...res.headers.entries()]
+		.filter(([name]) => name.toLowerCase() === "set-cookie")
+		.map(([, value]) => value);
+	return entryValues.length
+		? entryValues.join(", ")
+		: res.headers.get("set-cookie");
+};
+
 export const getCookieValue = (res: Response, name: string) => {
-	const setCookie = res.headers.get("set-cookie");
+	const setCookie = getSetCookieHeader(res);
 	if (!setCookie) {
 		return null;
 	}
-	const match = new RegExp(`(?:^|,)\s*${name}=([^;]+)`).exec(setCookie);
+	const match = new RegExp(`(?:^|,)\\s*${name}=([^;]+)`).exec(setCookie);
 	return match ? match[1] : null;
 };

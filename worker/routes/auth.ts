@@ -13,6 +13,7 @@ type DeleteRateData = {
 
 function clearSessionCookie(c: AppContext) {
 	deleteCookie(c, "session", { path: "/" });
+	deleteCookie(c, "auth_user", { path: "/" });
 }
 
 export function registerAuthRoutes(app: App) {

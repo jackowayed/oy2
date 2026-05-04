@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { signAuthJwt } from "../../worker/lib";
 import { jsonRequest } from "./testHelpers";
 import {
 	createTestEnv,
@@ -9,6 +10,12 @@ import {
 } from "./testUtils";
 
 describe("admin", () => {
+	const signTestJwt = (
+		env: ReturnType<typeof createTestEnv>["env"],
+		user: ReturnType<typeof seedUser>,
+		sessionId: string,
+	) => signAuthJwt({ env } as never, user, sessionId);
+
 	it("returns admin stats", async () => {
 		const { env, db } = createTestEnv();
 		const now = Math.floor(Date.now() / 1000);
@@ -49,6 +56,24 @@ describe("admin", () => {
 		});
 		assert.equal(res.status, 403);
 	});
+
+	it("re-checks admin status against the database", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "FormerAdmin", admin: 0 });
+		const jwt = await signTestJwt(
+			env,
+			{ ...user, admin: 1 },
+			"forged-admin-session",
+		);
+
+		const { res, json } = await jsonRequest(env, "/api/admin/stats", {
+			headers: { "x-session-token": jwt },
+		});
+
+		assert.equal(res.status, 403);
+		assert.equal(json.error, "Not authorized");
+	});
+
 
 	it("returns push health status", async () => {
 		const { env, db } = createTestEnv();

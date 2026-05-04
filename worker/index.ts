@@ -2,6 +2,12 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { Client } from "pg";
+import {
+	setAuthCookies,
+	signAuthJwt,
+	userFromAuthJwtPayload,
+	verifyAuthJwt,
+} from "./lib";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerDsarRoutes } from "./routes/dsar";
@@ -63,23 +69,32 @@ app.use("*", async (c: AppContext, next) => {
 		getCookie(c, "session") || c.req.header("x-session-token");
 	if (sessionToken) {
 		try {
-			const userResult = await c
-				.get("dbNoCache")
-				.query<User>(
-					`SELECT users.*
-					FROM sessions
-					JOIN users ON users.id = sessions.user_id
-					WHERE sessions.token = $1`,
-					[sessionToken],
-				)
-				.catch((err) => {
-					console.error("Error fetching user from DB:", err);
-					return { rows: [] };
-				});
-			const user = userResult.rows[0] ?? null;
-			c.set("user", user);
-			if (user) {
-				c.set("sessionToken", sessionToken);
+			const verified = await verifyAuthJwt(c, sessionToken);
+			if (verified.status === "valid") {
+				c.set("user", userFromAuthJwtPayload(verified.payload));
+				c.set("sessionToken", verified.payload.sid);
+			} else {
+				const lookupToken =
+					verified.status === "expired" ? verified.payload.sid : sessionToken;
+				const userResult = await c
+					.get("dbNoCache")
+					.query<User>(
+						`SELECT users.*
+						FROM sessions
+						JOIN users ON users.id = sessions.user_id
+						WHERE sessions.token = $1`,
+						[lookupToken],
+					)
+					.catch((err) => {
+						console.error("Error fetching user from DB:", err);
+						return { rows: [] };
+					});
+				const user = userResult.rows[0] ?? null;
+				c.set("user", user);
+				if (user) {
+					c.set("sessionToken", lookupToken);
+					setAuthCookies(c, await signAuthJwt(c, user, lookupToken), user);
+				}
 			}
 		} catch (err) {
 			console.error("Error fetching user:", err);

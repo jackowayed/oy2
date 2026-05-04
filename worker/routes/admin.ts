@@ -4,7 +4,7 @@ import type { App, AppContext, BlockedUserRow, UserReportRow } from "../types";
 
 export function registerAdminRoutes(app: App) {
 	app.get("/api/admin/stats", async (c: AppContext) => {
-		const adminCheck = requireAdmin(c);
+		const adminCheck = await requireAdmin(c);
 		if (!adminCheck.ok) {
 			return c.json(adminCheck.response, adminCheck.status);
 		}
@@ -177,7 +177,7 @@ export function registerAdminRoutes(app: App) {
 	});
 
 	app.get("/api/admin/push/health", async (c: AppContext) => {
-		const adminCheck = requireAdmin(c);
+		const adminCheck = await requireAdmin(c);
 		if (!adminCheck.ok) {
 			return c.json(adminCheck.response, adminCheck.status);
 		}

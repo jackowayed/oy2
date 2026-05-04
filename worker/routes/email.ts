@@ -1,5 +1,10 @@
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { authUserPayload, createSession, updateLastSeen } from "../lib";
+import {
+	authUserPayload,
+	createSession,
+	setAuthCookies,
+	updateLastSeen,
+} from "../lib";
 import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
@@ -38,16 +43,6 @@ async function generatePendingId(): Promise<string> {
 	const array = new Uint8Array(32);
 	crypto.getRandomValues(array);
 	return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function setSessionCookie(c: AppContext, token: string) {
-	setCookie(c, "session", token, {
-		httpOnly: true,
-		secure: true,
-		sameSite: "Strict",
-		path: "/",
-		maxAge: 60 * 60 * 24 * 365,
-	});
 }
 
 function generateEmailHtml(code: string): string {
@@ -250,7 +245,7 @@ export function registerEmailRoutes(app: App) {
 			// Existing user - log them in
 			const user = existingUser.rows[0];
 			const sessionToken = await createSession(c, user);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
 			// Demo accounts never require passkey setup during App Store review
@@ -284,7 +279,7 @@ export function registerEmailRoutes(app: App) {
 				);
 			const user = inserted.rows[0];
 			const sessionToken = await createSession(c, user);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
 			return c.json({
@@ -387,7 +382,7 @@ export function registerEmailRoutes(app: App) {
 
 			// Create session for claimed user
 			const sessionToken = await createSession(c, existingUser);
-			setSessionCookie(c, sessionToken);
+			setAuthCookies(c, sessionToken, existingUser);
 			updateLastSeen(c, existingUser.id);
 
 			return c.json({
@@ -413,7 +408,7 @@ export function registerEmailRoutes(app: App) {
 
 		// Create session
 		const sessionToken = await createSession(c, user);
-		setSessionCookie(c, sessionToken);
+		setAuthCookies(c, sessionToken, user);
 		updateLastSeen(c, user.id);
 
 		return c.json({

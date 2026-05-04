@@ -937,6 +937,11 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 			const user = this.db.users.find((row) => row.id === userId) ?? null;
 			return { results: user ? [user] : [] };
 		}
+		if (sql.startsWith("SELECT admin FROM users WHERE id = ?")) {
+			const [userId] = this.params as [number];
+			const user = this.db.users.find((row) => row.id === userId) ?? null;
+			return { results: user ? [{ admin: user.admin }] : [] };
+		}
 		if (sql.startsWith("SELECT id, username FROM users WHERE id = ?")) {
 			const [userId] = this.params as [number];
 			const user = this.db.users.find((row) => row.id === userId) ?? null;
@@ -1930,6 +1935,11 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 			const [userId] = this.params as [number];
 			return this.db.users.find((user) => user.id === userId) ?? null;
 		}
+		if (sql.startsWith("SELECT admin FROM users WHERE id = ?")) {
+			const [userId] = this.params as [number];
+			const user = this.db.users.find((row) => row.id === userId) ?? null;
+			return user ? { admin: user.admin } : null;
+		}
 		if (sql.startsWith("SELECT * FROM users WHERE LOWER(email) = ?")) {
 			const [email] = this.params as [string];
 			return (
@@ -2034,6 +2044,7 @@ export function createTestEnv() {
 		GOOGLE_CLIENT_ID: "google-client",
 		GOOGLE_CLIENT_SECRET: "google-secret",
 		RESEND_API_KEY: "resend-key",
+		JWT_SECRET: "test-jwt-secret",
 		RP_NAME: "Oy",
 	};
 	return { env, db, kv };

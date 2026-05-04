@@ -49,6 +49,7 @@ const initialTab =
 	requestedTab && ["friends", "oys", "add"].includes(requestedTab)
 		? requestedTab
 		: "friends";
+const authUserCookieName = "auth_user";
 const cachedUserStorageKey = "cachedUser";
 const cachedFriendsStorageKey = "cachedFriends";
 const cachedLastOyInfoStorageKey = "cachedLastOyInfo";
@@ -88,6 +89,31 @@ if (needsChooseUsername || needsPasskeySetup) {
 	history.replaceState(null, "", cleanUrl);
 }
 
+function getCookieValue(name: string) {
+	const match = document.cookie.match(
+		new RegExp(
+			`(?:^|; )${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]*)`,
+		),
+	);
+	return match ? decodeURIComponent(match[1]) : null;
+}
+
+function parseAuthUserCookie() {
+	const value = getCookieValue(authUserCookieName);
+	if (!value) {
+		return null;
+	}
+	const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+	const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+	const json = decodeURIComponent(
+		Array.from(
+			atob(base64 + padding),
+			(char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`,
+		).join(""),
+	);
+	return JSON.parse(json) as User;
+}
+
 type AppProps = {
 	children?: JSX.Element;
 };
@@ -98,9 +124,9 @@ export default function App(props: AppProps) {
 	const cachedUserRaw = localStorage.getItem(cachedUserStorageKey);
 	const cachedFriendsRaw = localStorage.getItem(cachedFriendsStorageKey);
 	const cachedLastOyInfoRaw = localStorage.getItem(cachedLastOyInfoStorageKey);
-	const initialCachedUser = cachedUserRaw
-		? (JSON.parse(cachedUserRaw) as User)
-		: null;
+	const initialCachedUser =
+		parseAuthUserCookie() ??
+		(cachedUserRaw ? (JSON.parse(cachedUserRaw) as User) : null);
 	const initialCachedFriends = cachedFriendsRaw
 		? (JSON.parse(cachedFriendsRaw) as Friend[])
 		: [];
@@ -314,6 +340,9 @@ export default function App(props: AppProps) {
 			const error = await response
 				.json()
 				.catch(() => ({ error: "Request failed" }));
+			if (response.status === 401) {
+				clearSessionState();
+			}
 			throw new Error(error.error || "Request failed");
 		}
 		return response.json() as Promise<T>;
@@ -948,21 +977,17 @@ export default function App(props: AppProps) {
 	}
 
 	async function restoreSession() {
-		try {
-			const { user } = await api<{ user: User }>("/api/auth/session");
-			setCurrentUser(user);
-			localStorage.setItem(cachedUserStorageKey, JSON.stringify(user));
-			await loadData();
-		} catch (_err) {
-			setCurrentUser(null);
-			localStorage.removeItem(cachedUserStorageKey);
-			localStorage.removeItem(cachedFriendsStorageKey);
-			localStorage.removeItem(cachedLastOyInfoStorageKey);
+		if (!currentUser()) {
 			if (authStep() === "initial") {
 				setAuthStep("login");
 			}
-			setFriends([]);
-			setLastOyInfo([]);
+			return;
+		}
+		try {
+			localStorage.setItem(cachedUserStorageKey, JSON.stringify(currentUser()));
+			await loadData();
+		} catch (_err) {
+			clearSessionState();
 		}
 	}
 

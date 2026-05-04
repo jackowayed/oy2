@@ -33,6 +33,7 @@ export type Bindings = {
 	APNS_USE_SANDBOX?: string;
 	// Email
 	RESEND_API_KEY: string;
+	JWT_SECRET: string;
 	// WebAuthn
 	RP_NAME: string;
 	WEBAUTHN_ORIGIN?: string;
