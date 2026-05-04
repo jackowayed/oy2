@@ -1,6 +1,6 @@
 import { Tooltip } from "@kobalte/core/tooltip";
 import type { JSX } from "solid-js";
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 
 type TouchTooltipProps = {
 	trigger: JSX.Element;
@@ -8,6 +8,7 @@ type TouchTooltipProps = {
 	triggerClass?: string;
 	contentClass?: string;
 	openDelay?: number;
+	triggerAs?: "button" | "span";
 };
 
 export function TouchTooltip(props: TouchTooltipProps) {
@@ -28,25 +29,51 @@ export function TouchTooltip(props: TouchTooltipProps) {
 			}}
 			openDelay={props.openDelay ?? 100}
 		>
-			<Tooltip.Trigger
-				as="button"
-				type="button"
-				class={props.triggerClass}
-				onPointerDown={(event) => {
-					if (event.pointerType === "touch") {
-						setLock(true);
-						setOpen((wasOpen) => {
-							const nextOpen = !wasOpen;
-							if (!nextOpen) {
-								setLock(false);
+			<Show
+				when={props.triggerAs === "span"}
+				fallback={
+					<Tooltip.Trigger
+						as="button"
+						type="button"
+						class={props.triggerClass}
+						onPointerDown={(event) => {
+							if (event.pointerType === "touch") {
+								setLock(true);
+								setOpen((wasOpen) => {
+									const nextOpen = !wasOpen;
+									if (!nextOpen) {
+										setLock(false);
+									}
+									return nextOpen;
+								});
 							}
-							return nextOpen;
-						});
-					}
-				}}
+						}}
+					>
+						{props.trigger}
+					</Tooltip.Trigger>
+				}
 			>
-				{props.trigger}
-			</Tooltip.Trigger>
+				<Tooltip.Trigger
+					as="span"
+					class={props.triggerClass}
+					onPointerDown={(event) => {
+						event.stopPropagation();
+						if (event.pointerType === "touch") {
+							setLock(true);
+							setOpen((wasOpen) => {
+								const nextOpen = !wasOpen;
+								if (!nextOpen) {
+									setLock(false);
+								}
+								return nextOpen;
+							});
+						}
+					}}
+					onClick={(event) => event.stopPropagation()}
+				>
+					{props.trigger}
+				</Tooltip.Trigger>
+			</Show>
 			<Tooltip.Portal>
 				<Tooltip.Content
 					class={props.contentClass}

@@ -111,38 +111,41 @@ export function FriendsList(props: FriendsListProps) {
 						return (
 							<div class="friends-list-item card">
 								<button
-									class="friends-list-item-profile-trigger"
+									class="friends-list-item-content stack stack-sm"
 									type="button"
 									onClick={() => props.onOpenProfileCards(friend.id)}
 								>
-									<div class="friends-list-item-content stack stack-sm">
-										<div class="friends-list-item-title item-title">
+									<span class="friends-list-item-profile-trigger">
+										<span class="friends-list-item-title item-title">
 											{displayName(friend.username, friend.nickname)}
-										</div>
-										<Show
-											when={lastOyCreatedAt !== null}
-											fallback={
-												<Show when={props.loadingLastOy()}>
-													<div class="friends-list-item-subtitle item-subtitle">
-														Loading...
-													</div>
-												</Show>
-											}
-										>
-											<div class="friends-list-item-subtitle item-subtitle">
+										</span>
+									</span>
+									<Show
+										when={lastOyCreatedAt !== null}
+										fallback={
+											<Show when={props.loadingLastOy()}>
+												<span class="friends-list-item-profile-trigger friends-list-item-subtitle item-subtitle">
+													Loading...
+												</span>
+											</Show>
+										}
+									>
+										<span class="friends-list-item-subtitle-row">
+											<span class="friends-list-item-profile-trigger friends-list-item-subtitle item-subtitle">
 												{lastOyDirection}{" "}
 												{formatRelativeTime(lastOyCreatedAt as number)}
-												<Show when={friend.streak >= 2}>
-													<TouchTooltip
-														triggerClass="streak-trigger"
-														contentClass="streak-popover"
-														trigger="🔥"
-														content={`${friend.streak}-day streak!`}
-													/>
-												</Show>
-											</div>
-										</Show>
-									</div>
+											</span>
+											<Show when={friend.streak >= 2}>
+												<TouchTooltip
+													triggerClass="streak-trigger"
+													contentClass="streak-popover"
+													triggerAs="span"
+													trigger="🔥"
+													content={`${friend.streak}-day streak!`}
+												/>
+											</Show>
+										</span>
+									</Show>
 								</button>
 								<div class="friends-list-item-actions">
 									<AsyncButton

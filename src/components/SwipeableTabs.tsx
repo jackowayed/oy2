@@ -114,8 +114,6 @@ export function SwipeableTabs(props: SwipeableTabsProps) {
 		clientX: number,
 		clientY: number,
 		target: HTMLElement | null,
-		currentTarget: HTMLElement | null,
-		pointerId?: number,
 	) => {
 		if (isSwipeBlockedTarget(target)) {
 			return;
@@ -125,9 +123,6 @@ export function SwipeableTabs(props: SwipeableTabsProps) {
 		samples.length = 0;
 		samples.push({ t: performance.now(), x: 0, y: 0 });
 		setDragging(true);
-		if (pointerId !== undefined) {
-			currentTarget?.setPointerCapture(pointerId);
-		}
 	};
 
 	const scheduleUpdate = () => {
@@ -218,13 +213,7 @@ export function SwipeableTabs(props: SwipeableTabsProps) {
 		if (event.pointerType === "mouse" && event.button !== 0) {
 			return;
 		}
-		beginDrag(
-			event.clientX,
-			event.clientY,
-			event.target as HTMLElement | null,
-			event.currentTarget as HTMLElement | null,
-			event.pointerId,
-		);
+		beginDrag(event.clientX, event.clientY, event.target as HTMLElement | null);
 	};
 
 	const handlePointerMove = (event: PointerEvent) => {
@@ -256,12 +245,7 @@ export function SwipeableTabs(props: SwipeableTabsProps) {
 		if (!touch) {
 			return;
 		}
-		beginDrag(
-			touch.clientX,
-			touch.clientY,
-			event.target as HTMLElement | null,
-			event.currentTarget as HTMLElement | null,
-		);
+		beginDrag(touch.clientX, touch.clientY, event.target as HTMLElement | null);
 	};
 
 	const handleTouchMove = (event: TouchEvent) => {

@@ -61,17 +61,26 @@
 .friends-list-item-content {
 	flex: 1;
 	min-width: 0;
-}
-
-.friends-list-item-profile-trigger {
-	flex: 1;
-	min-width: 0;
 	text-align: left;
 	background: none;
 	border: none;
 	color: inherit;
+	font: inherit;
 	padding: 0;
 	cursor: pointer;
+	outline: none;
+}
+
+.friends-list-item-content:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 4px;
+	border-radius: 8px;
+}
+
+.friends-list-item-profile-trigger {
+	display: block;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .friends-list-item-title {
@@ -154,6 +163,13 @@
 	display: flex;
 	align-items: center;
 	gap: 0.35rem;
+}
+
+.friends-list-item-subtitle-row {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	min-width: 0;
 }
 
 .friends-list-item-subtitle .direction-arrow {
