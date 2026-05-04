@@ -16,28 +16,20 @@ export function registerPushRoutes(app: App) {
 			return c.json({ error: "Invalid subscription" }, 400);
 		}
 
-		// Remove this endpoint from any other user (endpoint is device-specific)
-		await c
-			.get("db")
-			.query(
-				"DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id != $2",
-				[endpoint, user.id],
-			);
-
 		await c.get("db").query(
 			`
-      DELETE FROM push_subscriptions
-      WHERE user_id = $1 AND endpoint = $2 AND platform = 'web'
-    `,
-			[user.id, endpoint],
-		);
-
-		await c.get("db").query(
-			`
-      INSERT INTO push_subscriptions
-        (user_id, platform, endpoint, keys_p256dh, keys_auth, native_token)
-      VALUES ($1, 'web', $2, $3, $4, NULL)
-    `,
+	      INSERT INTO push_subscriptions
+	        (user_id, platform, endpoint, keys_p256dh, keys_auth, native_token)
+	      VALUES ($1, 'web', $2, $3, $4, NULL)
+	      ON CONFLICT (endpoint) WHERE endpoint IS NOT NULL
+	      DO UPDATE SET
+	        user_id = EXCLUDED.user_id,
+	        platform = 'web',
+	        keys_p256dh = EXCLUDED.keys_p256dh,
+	        keys_auth = EXCLUDED.keys_auth,
+	        native_token = NULL,
+	        apns_environment = NULL
+	    `,
 			[user.id, endpoint, keys.p256dh, keys.auth],
 		);
 
@@ -70,27 +62,20 @@ export function registerPushRoutes(app: App) {
 			return c.json({ error: "Invalid native subscription" }, 400);
 		}
 
-		await c
-			.get("db")
-			.query(
-				"DELETE FROM push_subscriptions WHERE native_token = $1 AND user_id != $2",
-				[nativeToken, user.id],
-			);
-
 		await c.get("db").query(
 			`
-      DELETE FROM push_subscriptions
-      WHERE user_id = $1 AND native_token = $2
-    `,
-			[user.id, nativeToken],
-		);
-
-		await c.get("db").query(
-			`
-      INSERT INTO push_subscriptions
-        (user_id, platform, endpoint, keys_p256dh, keys_auth, native_token, apns_environment)
-      VALUES ($1, $2, NULL, NULL, NULL, $3, $4)
-    `,
+	      INSERT INTO push_subscriptions
+	        (user_id, platform, endpoint, keys_p256dh, keys_auth, native_token, apns_environment)
+	      VALUES ($1, $2, NULL, NULL, NULL, $3, $4)
+	      ON CONFLICT (native_token) WHERE native_token IS NOT NULL
+	      DO UPDATE SET
+	        user_id = EXCLUDED.user_id,
+	        platform = EXCLUDED.platform,
+	        endpoint = NULL,
+	        keys_p256dh = NULL,
+	        keys_auth = NULL,
+	        apns_environment = EXCLUDED.apns_environment
+	    `,
 			[
 				user.id,
 				nativePlatform,

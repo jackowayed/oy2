@@ -54,6 +54,39 @@ describe("push subscriptions", () => {
 		assert.equal(db.pushSubscriptions.length, 0);
 	});
 
+	it("updates existing endpoint subscriptions", async () => {
+		const { env, db } = createTestEnv();
+		const firstUser = seedUser(db, { username: "Pushy" });
+		const secondUser = seedUser(db, { username: "Pushier" });
+		seedSession(db, firstUser.id, "first-push-token");
+		seedSession(db, secondUser.id, "second-push-token");
+
+		const endpoint = "https://example.com/same-endpoint";
+		await jsonRequest(env, "/api/push/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "first-push-token" },
+			body: {
+				endpoint,
+				keys: { p256dh: "old-p256", auth: "old-auth" },
+			},
+		});
+		const { res, json } = await jsonRequest(env, "/api/push/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "second-push-token" },
+			body: {
+				endpoint,
+				keys: { p256dh: "new-p256", auth: "new-auth" },
+			},
+		});
+
+		assert.equal(res.status, 200);
+		assert.equal(json.success, true);
+		assert.equal(db.pushSubscriptions.length, 1);
+		assert.equal(db.pushSubscriptions[0]?.user_id, secondUser.id);
+		assert.equal(db.pushSubscriptions[0]?.keys_p256dh, "new-p256");
+		assert.equal(db.pushSubscriptions[0]?.keys_auth, "new-auth");
+	});
+
 	it("subscribes and unsubscribes native tokens", async () => {
 		const { env, db } = createTestEnv();
 		const user = seedUser(db, { username: "NativePushy" });

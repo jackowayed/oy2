@@ -708,47 +708,71 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 				},
 			};
 		}
-		if (sql.startsWith("INSERT INTO push_subscriptions")) {
-			if (sql.includes("'web'") && this.params.length === 4) {
-				const [userId, endpoint, p256dh, auth] = this.params as [
-					number,
-					string,
-					string,
-					string,
-				];
-				this.db.pushSubscriptions.push({
-					user_id: userId,
-					platform: "web",
-					endpoint,
-					keys_p256dh: p256dh,
-					keys_auth: auth,
-					native_token: null,
-					apns_environment: null,
-					created_at: nowSeconds(),
-				});
-				return { success: true, meta: { last_row_id: 0, changes: 1 } };
+			if (sql.startsWith("INSERT INTO push_subscriptions")) {
+				if (sql.includes("'web'") && this.params.length === 4) {
+					const [userId, endpoint, p256dh, auth] = this.params as [
+						number,
+						string,
+						string,
+						string,
+					];
+					const existing = this.db.pushSubscriptions.find(
+						(row) => row.endpoint === endpoint,
+					);
+					if (existing) {
+						existing.user_id = userId;
+						existing.platform = "web";
+						existing.keys_p256dh = p256dh;
+						existing.keys_auth = auth;
+						existing.native_token = null;
+						existing.apns_environment = null;
+						return { success: true, meta: { last_row_id: 0, changes: 1 } };
+					}
+					this.db.pushSubscriptions.push({
+						user_id: userId,
+						platform: "web",
+						endpoint,
+						keys_p256dh: p256dh,
+						keys_auth: auth,
+						native_token: null,
+						apns_environment: null,
+						created_at: nowSeconds(),
+					});
+					return { success: true, meta: { last_row_id: 0, changes: 1 } };
+				}
+				if (!sql.includes("'web'") && this.params.length === 4) {
+					const [userId, platform, token, apnsEnvironment] = this.params as [
+						number,
+						"ios" | "android",
+						string,
+						"sandbox" | "production" | null,
+					];
+					const existing = this.db.pushSubscriptions.find(
+						(row) => row.native_token === token,
+					);
+					if (existing) {
+						existing.user_id = userId;
+						existing.platform = platform;
+						existing.endpoint = null;
+						existing.keys_p256dh = null;
+						existing.keys_auth = null;
+						existing.apns_environment = apnsEnvironment;
+						return { success: true, meta: { last_row_id: 0, changes: 1 } };
+					}
+					this.db.pushSubscriptions.push({
+						user_id: userId,
+						platform,
+						endpoint: null,
+						keys_p256dh: null,
+						keys_auth: null,
+						native_token: token,
+						apns_environment: apnsEnvironment,
+						created_at: nowSeconds(),
+					});
+					return { success: true, meta: { last_row_id: 0, changes: 1 } };
+				}
+				throw new Error(`Unsupported push subscription params: ${this.params.length}`);
 			}
-			if (!sql.includes("'web'") && this.params.length === 4) {
-				const [userId, platform, token, apnsEnvironment] = this.params as [
-					number,
-					"ios" | "android",
-					string,
-					"sandbox" | "production" | null,
-				];
-				this.db.pushSubscriptions.push({
-					user_id: userId,
-					platform,
-					endpoint: null,
-					keys_p256dh: null,
-					keys_auth: null,
-					native_token: token,
-					apns_environment: apnsEnvironment,
-					created_at: nowSeconds(),
-				});
-				return { success: true, meta: { last_row_id: 0, changes: 1 } };
-			}
-			throw new Error(`Unsupported push subscription params: ${this.params.length}`);
-		}
 		if (
 			sql.startsWith(
 				"INSERT INTO user_blocks (blocker_user_id, blocked_user_id) VALUES",
