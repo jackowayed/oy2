@@ -19,3 +19,7 @@
 	min-height: 0;
 	box-sizing: border-box;
 }
+
+.app-container-wide {
+	max-width: 960px;
+}

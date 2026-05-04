@@ -2,12 +2,11 @@
 	display: flex;
 	flex-direction: column;
 	gap: 1.5rem;
-	padding: 2rem 1.5rem 3rem;
-	max-width: 960px;
-	margin: 0 auto;
+	padding: 0.5rem 0 3rem;
+	overflow-y: auto;
 }
 
-.admin-header {
+.admin-overview {
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
@@ -23,12 +22,6 @@
 .admin-subtitle {
 	color: var(--text-light);
 	margin-top: 0.25rem;
-}
-
-.admin-actions {
-	display: flex;
-	gap: 0.5rem;
-	align-items: center;
 }
 
 .admin-status {
@@ -211,7 +204,7 @@
 
 @media (max-width: 600px) {
 	.admin-screen {
-		padding: 1.5rem 1rem 2rem;
+		padding: 0.5rem 0 2rem;
 	}
 
 	.admin-table {

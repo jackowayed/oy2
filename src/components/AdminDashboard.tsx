@@ -54,7 +54,6 @@ type AdminStatsResponse = {
 
 type AdminDashboardProps = {
 	user: User;
-	onLogout: () => void;
 	api: <T>(endpoint: string, options?: RequestInit) => Promise<T>;
 };
 
@@ -90,21 +89,16 @@ export function AdminDashboard(props: AdminDashboardProps) {
 
 	return (
 		<div class="admin-screen">
-			<div class="admin-header">
+			<div class="admin-overview">
 				<div>
 					<h1 class="admin-title">Admin</h1>
 					<p class="admin-subtitle">
 						Last 24 hours · Signed in as {props.user.username}
 					</p>
 				</div>
-				<div class="admin-actions">
-					<button class="btn-secondary" onClick={loadStats} type="button">
-						Refresh
-					</button>
-					<button class="btn-text" onClick={props.onLogout} type="button">
-						Logout
-					</button>
-				</div>
+				<button class="btn-secondary" onClick={loadStats} type="button">
+					Refresh
+				</button>
 			</div>
 
 			<Show when={loading()}>
