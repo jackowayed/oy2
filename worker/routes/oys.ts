@@ -195,11 +195,20 @@ export function registerOyRoutes(app: App) {
 			return c.json({ error: "Missing location" }, 400);
 		}
 
+		const finiteOrNull = (value: unknown): number | null => {
+			const n = Number(value);
+			return Number.isFinite(n) ? n : null;
+		};
+
 		const city = await reverseGeocodeCity(c, lat, lon);
 		const payload = JSON.stringify({
 			lat,
 			lon,
-			accuracy: location.accuracy || null,
+			accuracy: finiteOrNull(location?.accuracy),
+			altitude: finiteOrNull(location?.altitude),
+			altitudeAccuracy: finiteOrNull(location?.altitudeAccuracy),
+			heading: finiteOrNull(location?.heading),
+			speed: finiteOrNull(location?.speed),
 			city,
 		});
 

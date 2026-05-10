@@ -51,6 +51,10 @@ export type OyPayload = {
 	lat: number;
 	lon: number;
 	accuracy?: number | null;
+	altitude?: number | null;
+	altitudeAccuracy?: number | null;
+	heading?: number | null;
+	speed?: number | null;
 	city?: string | null;
 };
 
