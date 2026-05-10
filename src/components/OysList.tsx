@@ -167,11 +167,7 @@ export function OysList(props: OysListProps) {
 						// GPS reports spurious speeds of 0-2 m/s when stationary. A 2.5 m/s
 						// (~9 km/h) floor cuts that noise while still showing joggers,
 						// cyclists, cars, and trains. Brisk walking (~1.4 m/s) is excluded.
-						if (
-							isLocation &&
-							payload?.speed != null &&
-							payload.speed > 2.5
-						) {
+						if (isLocation && payload?.speed != null && payload.speed > 2.5) {
 							subtitleParts.push(formatSpeed(payload.speed));
 						}
 						const subtitle = subtitleParts.join(" · ");
