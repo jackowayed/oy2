@@ -148,6 +148,13 @@ export function OysList(props: OysListProps) {
 						if (distance) {
 							subtitleParts.push(`${distance} away`);
 						}
+						// Altitude is reported relative to the WGS84 ellipsoid, which
+						// deviates from sea level by up to ~100m; GPS vertical noise adds
+						// another ~20-50m. A 250m floor clears that band so a phone at the
+						// beach doesn't randomly show "100m up", while still catching
+						// mountain towns (Denver ~1600m) and ski lifts. The altitudeAccuracy
+						// filter excludes Wi-Fi/IP-derived fixes, which typically have null
+						// or huge accuracy values.
 						if (
 							isLocation &&
 							payload?.altitude != null &&
@@ -157,6 +164,9 @@ export function OysList(props: OysListProps) {
 						) {
 							subtitleParts.push(formatAltitude(payload.altitude));
 						}
+						// GPS reports spurious speeds of 0-2 m/s when stationary. A 2.5 m/s
+						// (~9 km/h) floor cuts that noise while still showing joggers,
+						// cyclists, cars, and trains. Brisk walking (~1.4 m/s) is excluded.
 						if (
 							isLocation &&
 							payload?.speed != null &&
