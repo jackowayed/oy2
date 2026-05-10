@@ -5,6 +5,8 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { Oy, OyPayload } from "../types";
 import {
 	calculateDistance,
+	formatAltitude,
+	formatSpeed,
 	formatTime,
 	onAppVisible,
 	openMapsDeepLink,
@@ -138,13 +140,31 @@ export function OysList(props: OysListProps) {
 									)
 								: null;
 
-						const subtitleBase =
-							isLocation && payload?.city
-								? `${payload.city} · ${formatRelativeTime(oy.created_at)}`
-								: formatRelativeTime(oy.created_at);
-						const subtitle = distance
-							? `${subtitleBase} · ${distance} away`
-							: subtitleBase;
+						const subtitleParts: string[] = [];
+						if (isLocation && payload?.city) {
+							subtitleParts.push(payload.city);
+						}
+						subtitleParts.push(formatRelativeTime(oy.created_at));
+						if (distance) {
+							subtitleParts.push(`${distance} away`);
+						}
+						if (
+							isLocation &&
+							payload?.altitude != null &&
+							payload.altitude > 250 &&
+							payload.altitudeAccuracy != null &&
+							payload.altitudeAccuracy < 50
+						) {
+							subtitleParts.push(formatAltitude(payload.altitude));
+						}
+						if (
+							isLocation &&
+							payload?.speed != null &&
+							payload.speed > 2.5
+						) {
+							subtitleParts.push(formatSpeed(payload.speed));
+						}
+						const subtitle = subtitleParts.join(" · ");
 						const isOpen = () => props.openLocations().has(oy.id);
 
 						return (
