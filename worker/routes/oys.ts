@@ -231,6 +231,66 @@ export function registerOyRoutes(app: App) {
 		});
 	});
 
+	app.patch("/api/lo/:id", async (c: AppContext) => {
+		const user = c.get("user");
+		if (!user) {
+			return c.json({ error: "Not authenticated" }, 401);
+		}
+
+		const id = Number(c.req.param("id"));
+		if (!Number.isFinite(id)) {
+			return c.json({ error: "Invalid id" }, 400);
+		}
+
+		const { location } = await c.req.json();
+		if (!location || typeof location !== "object") {
+			return c.json({ error: "Missing location" }, 400);
+		}
+
+		const existingResult = await c.get("db").query<{ payload: string | null }>(
+			"SELECT payload FROM oys WHERE id = $1 AND from_user_id = $2 AND type = 'lo' LIMIT 1",
+			[id, user.id],
+		);
+		const existingRow = existingResult.rows[0];
+		if (!existingRow) {
+			return c.json({ error: "Not found" }, 404);
+		}
+
+		const finiteOrNull = (value: unknown): number | null => {
+			const n = Number(value);
+			return Number.isFinite(n) ? n : null;
+		};
+
+		const existing = existingRow.payload
+			? (JSON.parse(existingRow.payload) as Record<string, unknown>)
+			: {};
+
+		const lat = finiteOrNull(location.lat);
+		const lon = finiteOrNull(location.lon);
+		const merged = {
+			...existing,
+			lat: lat ?? existing.lat,
+			lon: lon ?? existing.lon,
+			accuracy: finiteOrNull(location.accuracy) ?? existing.accuracy ?? null,
+			altitude: finiteOrNull(location.altitude) ?? existing.altitude ?? null,
+			altitudeAccuracy:
+				finiteOrNull(location.altitudeAccuracy) ??
+				existing.altitudeAccuracy ??
+				null,
+			heading: finiteOrNull(location.heading) ?? existing.heading ?? null,
+			speed: finiteOrNull(location.speed) ?? existing.speed ?? null,
+		};
+
+		await c
+			.get("db")
+			.query("UPDATE oys SET payload = $1 WHERE id = $2", [
+				JSON.stringify(merged),
+				id,
+			]);
+
+		return c.json({ success: true });
+	});
+
 	app.get("/api/oys", async (c: AppContext) => {
 		const user = c.get("user");
 		if (!user) {

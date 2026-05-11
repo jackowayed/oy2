@@ -1183,6 +1183,36 @@ export default function App(props: AppProps) {
 		});
 	}
 
+	async function upgradeLoLocation(yoId: number) {
+		try {
+			const position = await getCurrentPosition({
+				enableHighAccuracy: true,
+				timeout: 10000,
+				maximumAge: 0,
+			});
+			const { altitude, speed } = position.coords;
+			if (altitude == null && speed == null) {
+				return;
+			}
+			await api(`/api/lo/${yoId}`, {
+				method: "PATCH",
+				body: JSON.stringify({
+					location: {
+						lat: position.coords.latitude,
+						lon: position.coords.longitude,
+						accuracy: position.coords.accuracy,
+						altitude,
+						altitudeAccuracy: position.coords.altitudeAccuracy,
+						heading: position.coords.heading,
+						speed,
+					},
+				}),
+			});
+		} catch {
+			// best-effort upgrade; coarse fix is already saved
+		}
+	}
+
 	function clearLocationPermissionNotice() {
 		setLocationPermissionNotice(null);
 	}
@@ -1252,10 +1282,14 @@ export default function App(props: AppProps) {
 				speed: position.coords.speed,
 			};
 
-			const { streak } = await api<{ streak: number }>("/api/lo", {
-				method: "POST",
-				body: JSON.stringify({ toUserId, location }),
-			});
+			const { streak, yoId } = await api<{ streak: number; yoId: number }>(
+				"/api/lo",
+				{
+					method: "POST",
+					body: JSON.stringify({ toUserId, location }),
+				},
+			);
+			void upgradeLoLocation(yoId);
 			const user = currentUser() as User;
 			const now = Date.now();
 			setLastOyInfo((prev) => {
