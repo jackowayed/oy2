@@ -1221,6 +1221,10 @@ export default function App(props: AppProps) {
 				lat: position.coords.latitude,
 				lon: position.coords.longitude,
 				accuracy: position.coords.accuracy,
+				altitude: position.coords.altitude,
+				altitudeAccuracy: position.coords.altitudeAccuracy,
+				heading: position.coords.heading,
+				speed: position.coords.speed,
 			};
 
 			const { streak } = await api<{ streak: number }>("/api/lo", {

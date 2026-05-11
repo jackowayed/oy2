@@ -5,6 +5,8 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { Oy, OyPayload } from "../types";
 import {
 	calculateDistance,
+	formatAltitude,
+	formatSpeed,
 	formatTime,
 	onAppVisible,
 	openMapsDeepLink,
@@ -138,13 +140,37 @@ export function OysList(props: OysListProps) {
 									)
 								: null;
 
-						const subtitleBase =
-							isLocation && payload?.city
-								? `${payload.city} · ${formatRelativeTime(oy.created_at)}`
-								: formatRelativeTime(oy.created_at);
-						const subtitle = distance
-							? `${subtitleBase} · ${distance} away`
-							: subtitleBase;
+						const subtitleParts: string[] = [];
+						if (isLocation && payload?.city) {
+							subtitleParts.push(payload.city);
+						}
+						subtitleParts.push(formatRelativeTime(oy.created_at));
+						if (distance) {
+							subtitleParts.push(`${distance} away`);
+						}
+						// Altitude is reported relative to the WGS84 ellipsoid, which
+						// deviates from sea level by up to ~100m; GPS vertical noise adds
+						// another ~20-50m. A 250m floor clears that band so a phone at the
+						// beach doesn't randomly show "100m up", while still catching
+						// mountain towns (Denver ~1600m) and ski lifts. The altitudeAccuracy
+						// filter excludes Wi-Fi/IP-derived fixes, which typically have null
+						// or huge accuracy values.
+						if (
+							isLocation &&
+							payload?.altitude != null &&
+							payload.altitude > 250 &&
+							payload.altitudeAccuracy != null &&
+							payload.altitudeAccuracy < 50
+						) {
+							subtitleParts.push(formatAltitude(payload.altitude));
+						}
+						// GPS reports spurious speeds of 0-2 m/s when stationary. A 2.5 m/s
+						// (~9 km/h) floor cuts that noise while still showing joggers,
+						// cyclists, cars, and trains. Brisk walking (~1.4 m/s) is excluded.
+						if (isLocation && payload?.speed != null && payload.speed > 2.5) {
+							subtitleParts.push(formatSpeed(payload.speed));
+						}
+						const subtitle = subtitleParts.join(" · ");
 						const isOpen = () => props.openLocations().has(oy.id);
 
 						return (

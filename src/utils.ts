@@ -80,6 +80,17 @@ function deg2rad(deg: number) {
 	return deg * (Math.PI / 180);
 }
 
+export function formatAltitude(meters: number): string {
+	if (meters < 1000) {
+		return `${Math.round(meters / 10) * 10}m up`;
+	}
+	return `${(meters / 1000).toFixed(1)}km up`;
+}
+
+export function formatSpeed(metersPerSecond: number): string {
+	return `${Math.round(metersPerSecond * 3.6)}km/h`;
+}
+
 export function buildMapsDeepLink(lat: number, lon: number): string {
 	const platform = Capacitor.getPlatform();
 	if (platform === "ios") {
