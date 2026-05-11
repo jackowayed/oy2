@@ -26,7 +26,7 @@ let package = Package(
                 .product(name: "CapacitorGeolocation", package: "CapacitorGeolocation"),
                 .product(name: "CapacitorPushNotifications", package: "CapacitorPushNotifications"),
                 .product(name: "CapgoCapacitorSocialLogin", package: "CapgoCapacitorSocialLogin"),
-                .product(name: "GledlyCapacitorWebauthn", package: "GledlyCapacitorWebauthn")
+                .product(name: "CapacitorWebauthn", package: "GledlyCapacitorWebauthn")
             ]
         )
     ]
