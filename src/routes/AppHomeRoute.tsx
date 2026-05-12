@@ -129,6 +129,7 @@ export function AppHomeRoute() {
 							loadingMore={loadingMoreOys}
 							loading={loadingOys}
 							onLoadMore={() => loadOysPage()}
+							api={api}
 						/>
 					</Tabs.Content>
 

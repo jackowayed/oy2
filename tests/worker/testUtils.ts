@@ -1554,6 +1554,25 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 				.slice(0, pageSize);
 			return { results: rows };
 		}
+		if (
+			sql.startsWith(
+				"SELECT payload, created_at FROM oys WHERE from_user_id = ? AND to_user_id = ? AND type = 'lo' AND payload IS NOT NULL",
+			)
+		) {
+			const [fromUserId, toUserId, limit] = this.params as [number, number, number];
+			const results = this.db.oys
+				.filter(
+					(row) =>
+						row.from_user_id === fromUserId &&
+						row.to_user_id === toUserId &&
+						row.type === "lo" &&
+						row.payload !== null,
+				)
+				.sort((a, b) => b.created_at - a.created_at)
+				.slice(0, limit)
+				.map((row) => ({ payload: row.payload, created_at: row.created_at }));
+			return { results };
+		}
 		if (sql.startsWith("WITH inbound AS")) {
 			const [
 				userId,

@@ -21,16 +21,61 @@ type MapContainer = HTMLDivElement & {
 	_leafletTileLayer?: L.TileLayer;
 };
 
+export type LoHistoryPoint = {
+	lat: number;
+	lon: number;
+	intensity: number;
+};
+
 function prefersDark() {
 	return window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+}
+
+// Read a CSS variable from the document root, with a fallback hex value.
+// This keeps colors in sync with styles.css rather than duplicating hex literals.
+function getCssVar(name: string, fallback: string): string {
+	return (
+		getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+		fallback
+	);
+}
+
+// Linearly interpolate between two integers (for RGB channels).
+function lerp(a: number, b: number, t: number): number {
+	return Math.round(a + (b - a) * t);
+}
+
+// Linearly interpolate between two floats (for opacity, weight, etc).
+function lerpf(a: number, b: number, t: number): number {
+	return a + (b - a) * t;
+}
+
+// Parse a 6-digit hex color into [r, g, b].
+function parseHex(hex: string): [number, number, number] {
+	const n = Number.parseInt(hex.replace("#", ""), 16);
+	return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+// Interpolate between two hex colors. t=0 → colorA, t=1 → colorB.
+function interpolateColor(colorA: string, colorB: string, t: number): string {
+	const [ar, ag, ab] = parseHex(colorA);
+	const [br, bg, bb] = parseHex(colorB);
+	const r = lerp(ar, br, t);
+	const g = lerp(ag, bg, t);
+	const b = lerp(ab, bb, t);
+	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
 export function initLocationMap(
 	container: MapContainer,
 	lat: number,
 	lon: number,
+	history?: LoHistoryPoint[],
 ) {
 	if (container.dataset.mapInit === "true") {
+		if (history && container._leafletMap) {
+			addHistoryMarkers(container._leafletMap, history);
+		}
 		return;
 	}
 
@@ -48,6 +93,11 @@ export function initLocationMap(
 		},
 	);
 	tileLayer.addTo(map);
+
+	if (history && history.length > 0) {
+		addHistoryMarkers(map, history);
+	}
+
 	L.marker([lat, lon]).addTo(map);
 	L.control.attribution({ prefix: false }).addTo(map);
 
@@ -61,4 +111,25 @@ export function initLocationMap(
 		container._leafletTileLayer?.setUrl(url);
 	};
 	media.addEventListener("change", updateTiles);
+}
+
+// Render past lo locations as colored circle markers.
+// intensity=0 (oldest) → --primary (purple), intensity=1 (newest) → --accent (amber).
+// Older points are smaller, more transparent, and thinner.
+function addHistoryMarkers(map: L.Map, history: LoHistoryPoint[]) {
+	const primary = getCssVar("--primary", "#7c3aed");
+	const accent = getCssVar("--accent", "#f59e0b");
+
+	for (const point of history) {
+		const t = point.intensity;
+		const color = interpolateColor(primary, accent, t);
+		L.circleMarker([point.lat, point.lon], {
+			radius: lerp(3, 7, t),
+			color,
+			fillColor: color,
+			fillOpacity: lerpf(0.2, 0.85, t),
+			opacity: lerpf(0.3, 1, t),
+			weight: lerpf(0.5, 2, t),
+		}).addTo(map);
+	}
 }

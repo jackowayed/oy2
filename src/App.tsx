@@ -9,6 +9,7 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
+	on,
 	onCleanup,
 	onMount,
 	Show,
@@ -174,7 +175,7 @@ export default function App(props: AppProps) {
 	const [loadingFriends, setLoadingFriends] = createSignal(false);
 	const [loadingLastOyInfo, setLoadingLastOyInfo] = createSignal(false);
 	const [refreshing, setRefreshing] = createSignal(false);
-	const [hasMoreOys, setHasMoreOys] = createSignal(true);
+	const [hasMoreOys, setHasMoreOys] = createSignal(false);
 	const [oysCursor, setOysCursor] = createSignal<OysCursor | null>(null);
 	const [showLocationExplainer, setShowLocationExplainer] = createSignal(false);
 	const [locationExplainerTargetId, setLocationExplainerTargetId] =
@@ -1629,11 +1630,19 @@ export default function App(props: AppProps) {
 		subscribeNativePushToken(token).catch(() => {});
 	});
 
-	createEffect(() => {
-		if (tab() === "oys" && currentUser()) {
-			loadOysPage({ reset: true });
-		}
-	});
+	// Reload oys when switching to the oys tab, but skip the initial run
+	// (loadData already fetches on mount).
+	createEffect(
+		on(
+			tab,
+			(currentTab) => {
+				if (currentTab === "oys" && currentUser()) {
+					loadOysPage({ reset: true });
+				}
+			},
+			{ defer: true },
+		),
+	);
 
 	const appContextValue = {
 		currentUser,

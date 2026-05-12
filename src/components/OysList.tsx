@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { Geolocation as CapacitorGeolocation } from "@capacitor/geolocation";
 import { Button } from "@kobalte/core/button";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import type { LoHistoryPoint } from "../map";
 import type { Oy, OyPayload } from "../types";
 import {
 	calculateDistance,
@@ -14,6 +15,10 @@ import {
 import { LocationMap } from "./LocationMap";
 import "./OysList.css";
 
+type LoHistoryResponse = {
+	locations: LoHistoryPoint[];
+};
+
 type OysListProps = {
 	oys: Oy[];
 	currentUserId: number;
@@ -23,6 +28,7 @@ type OysListProps = {
 	loadingMore: () => boolean;
 	loading: () => boolean;
 	onLoadMore: () => void;
+	api: <T>(path: string, options?: RequestInit) => Promise<T>;
 };
 
 export function OysList(props: OysListProps) {
@@ -31,6 +37,10 @@ export function OysList(props: OysListProps) {
 		lat: number;
 		lon: number;
 	} | null>(null);
+	// Map from oy id to fetched history points
+	const [historyCache, setHistoryCache] = createSignal<
+		Map<number, LoHistoryPoint[]>
+	>(new Map());
 
 	const intervalId = window.setInterval(() => {
 		setTimeTick(Date.now());
@@ -98,6 +108,37 @@ export function OysList(props: OysListProps) {
 			observer.disconnect();
 		});
 	});
+
+	const fetchHistory = async (oy: Oy) => {
+		if (historyCache().has(oy.id)) {
+			return;
+		}
+		const direction =
+			oy.from_user_id === props.currentUserId ? "outbound" : "inbound";
+		const friendId =
+			oy.from_user_id === props.currentUserId ? oy.to_user_id : oy.from_user_id;
+		try {
+			const response = await props.api<LoHistoryResponse>(
+				`/api/lo/history?friendId=${friendId}&direction=${direction}`,
+			);
+			setHistoryCache((prev) => {
+				const next = new Map(prev);
+				next.set(oy.id, response.locations);
+				return next;
+			});
+		} catch (err) {
+			console.warn("Failed to fetch lo history:", err);
+		}
+	};
+
+	const handleToggleLocation = (oy: Oy) => {
+		const wasOpen = props.openLocations().has(oy.id);
+		props.onToggleLocation(oy.id);
+		// Fetch history when opening a lo for the first time
+		if (!wasOpen && !historyCache().has(oy.id)) {
+			void fetchHistory(oy);
+		}
+	};
 
 	const formatRelativeTime = (timestamp: number) => {
 		timeTick();
@@ -172,13 +213,14 @@ export function OysList(props: OysListProps) {
 						}
 						const subtitle = subtitleParts.join(" · ");
 						const isOpen = () => props.openLocations().has(oy.id);
+						const history = () => historyCache().get(oy.id);
 
 						return (
 							<Button
 								class={`oys-list-item card${
 									isLocation ? " oys-list-item-location" : ""
 								}${isOutbound ? " oys-list-item-outbound" : " oys-list-item-inbound"}`}
-								onClick={() => isLocation && props.onToggleLocation(oy.id)}
+								onClick={() => isLocation && handleToggleLocation(oy)}
 								data-oy-id={oy.id}
 								aria-expanded={isLocation ? isOpen() : undefined}
 								disabled={!isLocation}
@@ -212,8 +254,24 @@ export function OysList(props: OysListProps) {
 										{/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation toggles the panel via the parent oy card button */}
 										<div
 											class="oys-list-item-map-slot"
+											onPointerDown={(event) => {
+												event.currentTarget.dataset.pointerX = String(
+													event.clientX,
+												);
+												event.currentTarget.dataset.pointerY = String(
+													event.clientY,
+												);
+											}}
 											onClick={(event) => {
 												event.stopPropagation();
+												const dx =
+													event.clientX -
+													Number(event.currentTarget.dataset.pointerX);
+												const dy =
+													event.clientY -
+													Number(event.currentTarget.dataset.pointerY);
+												// Ignore clicks that were actually drags (>4px movement)
+												if (Math.hypot(dx, dy) > 4) return;
 												openMapsDeepLink(payload.lat, payload.lon);
 											}}
 										>
@@ -224,6 +282,7 @@ export function OysList(props: OysListProps) {
 													lat={payload.lat}
 													lon={payload.lon}
 													open={isOpen()}
+													history={history()}
 												/>
 											</div>
 										</div>

@@ -36,7 +36,7 @@ app.use(
 			"http://127.0.0.1",
 		],
 		allowHeaders: ["Content-Type", "X-Session-Token"],
-		allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+		allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 		credentials: true,
 	}),
 );
@@ -65,7 +65,8 @@ app.use("*", async (c: AppContext, next) => {
 	c.set("user", null);
 	c.set("sessionToken", null);
 	// Prefer cookie, fall back to Authorization: Bearer (native clients) or x-session-token (tests)
-	const authHeader = c.req.header("authorization") || c.req.header("Authorization");
+	const authHeader =
+		c.req.header("authorization") || c.req.header("Authorization");
 	const bearerToken = authHeader?.startsWith("Bearer ")
 		? authHeader.slice(7).trim()
 		: undefined;
