@@ -35,7 +35,9 @@ import type {
 } from "./types";
 import {
 	apiFetch,
+	getUseImperial,
 	onAppVisible,
+	setUseImperial as persistUseImperial,
 	setNativeSessionToken,
 	urlBase64ToUint8Array,
 } from "./utils";
@@ -139,6 +141,7 @@ export default function App(props: AppProps) {
 		? (JSON.parse(cachedLastOyInfoRaw) as LastOyInfo[])
 		: [];
 
+	const [useImperial, setUseImperial] = createSignal(getUseImperial());
 	const [booting, setBooting] = createSignal(true);
 	const [currentUser, setCurrentUser] = createSignal<User | null>(
 		initialCachedUser,
@@ -1635,8 +1638,15 @@ export default function App(props: AppProps) {
 		}
 	});
 
+	function handleSetUseImperial(imperial: boolean) {
+		persistUseImperial(imperial);
+		setUseImperial(imperial);
+	}
+
 	const appContextValue = {
 		currentUser,
+		useImperial,
+		setUseImperial: handleSetUseImperial,
 		friends,
 		friendsWithLastOy,
 		lastOyInfo,

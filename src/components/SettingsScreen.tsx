@@ -16,6 +16,8 @@ import "./SettingsScreen.css";
 
 type SettingsScreenProps = {
 	user: User;
+	useImperial: boolean;
+	onSetUseImperial: (imperial: boolean) => void;
 	onSetupNotifications: () => Promise<void>;
 	onDeleteAccount: () => Promise<void>;
 	api: <T>(path: string, options?: RequestInit) => Promise<T>;
@@ -176,6 +178,33 @@ export function SettingsScreen(props: SettingsScreenProps) {
 					<AsyncButton class="btn-primary" onClick={props.onSetupNotifications}>
 						Enable Notifications
 					</AsyncButton>
+				</div>
+			</section>
+
+			<section class="settings-section">
+				<div class="settings-section-row">
+					<div>
+						<h3 class="settings-section-title">Units</h3>
+						<p class="settings-section-description">
+							Distance, speed, and altitude units.
+						</p>
+					</div>
+					<div class="settings-units-toggle">
+						<button
+							class={`settings-units-option${!props.useImperial ? " settings-units-active" : ""}`}
+							type="button"
+							onClick={() => props.onSetUseImperial(false)}
+						>
+							km
+						</button>
+						<button
+							class={`settings-units-option${props.useImperial ? " settings-units-active" : ""}`}
+							type="button"
+							onClick={() => props.onSetUseImperial(true)}
+						>
+							mi
+						</button>
+					</div>
 				</div>
 			</section>
 

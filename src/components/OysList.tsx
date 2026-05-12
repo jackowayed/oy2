@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { Geolocation as CapacitorGeolocation } from "@capacitor/geolocation";
 import { Button } from "@kobalte/core/button";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { useAppContext } from "../AppContext";
 import type { Oy, OyPayload } from "../types";
 import {
 	calculateDistance,
@@ -26,6 +27,7 @@ type OysListProps = {
 };
 
 export function OysList(props: OysListProps) {
+	const { useImperial } = useAppContext();
 	const [timeTick, setTimeTick] = createSignal(Date.now());
 	const [myLocation, setMyLocation] = createSignal<{
 		lat: number;
@@ -44,40 +46,43 @@ export function OysList(props: OysListProps) {
 	};
 
 	onMount(() => {
-		const getCurrentLocation = async () => {
-			try {
-				if (Capacitor.isNativePlatform()) {
-					if (!Capacitor.isPluginAvailable("Geolocation")) {
-						throw new Error("Native geolocation plugin unavailable");
+		// watchPosition fires immediately with any cached position, then
+		// continues updating as the device refines its location.
+		let watchId: number | undefined;
+		if (Capacitor.isNativePlatform()) {
+			if (Capacitor.isPluginAvailable("Geolocation")) {
+				CapacitorGeolocation.watchPosition({}, (position, err) => {
+					if (err) {
+						console.warn("Geolocation failed:", err);
+						return;
 					}
-
-					const position = await CapacitorGeolocation.getCurrentPosition();
-					setMyLocation({
-						lat: position.coords.latitude,
-						lon: position.coords.longitude,
-					});
-					return;
-				}
-
-				if (!("geolocation" in navigator)) {
-					return;
-				}
-
-				navigator.geolocation.getCurrentPosition(
-					(position) => {
+					if (position) {
 						setMyLocation({
 							lat: position.coords.latitude,
 							lon: position.coords.longitude,
 						});
-					},
-					(err) => {
+					}
+				})
+					.then((id) => {
+						watchId = id as unknown as number;
+					})
+					.catch((err) => {
 						console.warn("Geolocation failed:", err);
-					},
-				);
-			} catch (err) {
-				console.warn("Geolocation failed:", err);
+					});
 			}
-		};
+		} else if ("geolocation" in navigator) {
+			watchId = navigator.geolocation.watchPosition(
+				(position) => {
+					setMyLocation({
+						lat: position.coords.latitude,
+						lon: position.coords.longitude,
+					});
+				},
+				(err) => {
+					console.warn("Geolocation failed:", err);
+				},
+			);
+		}
 
 		const observer = new IntersectionObserver(
 			(entries) => {
@@ -92,10 +97,15 @@ export function OysList(props: OysListProps) {
 			observer.observe(sentinel);
 		}
 
-		void getCurrentLocation();
-
 		onCleanup(() => {
 			observer.disconnect();
+			if (Capacitor.isNativePlatform()) {
+				if (watchId !== undefined) {
+					CapacitorGeolocation.clearWatch({ id: watchId as unknown as string });
+				}
+			} else if (watchId !== undefined) {
+				navigator.geolocation.clearWatch(watchId);
+			}
 		});
 	});
 
@@ -137,6 +147,7 @@ export function OysList(props: OysListProps) {
 										location.lon,
 										payload.lat,
 										payload.lon,
+										useImperial(),
 									)
 								: null;
 
@@ -162,13 +173,15 @@ export function OysList(props: OysListProps) {
 							payload.altitudeAccuracy != null &&
 							payload.altitudeAccuracy < 50
 						) {
-							subtitleParts.push(formatAltitude(payload.altitude));
+							subtitleParts.push(
+								formatAltitude(payload.altitude, useImperial()),
+							);
 						}
 						// GPS reports spurious speeds of 0-2 m/s when stationary. A 2.5 m/s
 						// (~9 km/h) floor cuts that noise while still showing joggers,
 						// cyclists, cars, and trains. Brisk walking (~1.4 m/s) is excluded.
 						if (isLocation && payload?.speed != null && payload.speed > 2.5) {
-							subtitleParts.push(formatSpeed(payload.speed));
+							subtitleParts.push(formatSpeed(payload.speed, useImperial()));
 						}
 						const subtitle = subtitleParts.join(" · ");
 						const isOpen = () => props.openLocations().has(oy.id);
