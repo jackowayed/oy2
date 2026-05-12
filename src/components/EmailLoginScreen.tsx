@@ -1,7 +1,12 @@
 import { Button } from "@kobalte/core/button";
 import { createSignal, Show } from "solid-js";
 import { appLogoText } from "../branding";
-import { apiFetch } from "../utils";
+import {
+	apiFetch,
+	getEmailPendingId,
+	setEmailPendingId,
+	setNativeSessionToken,
+} from "../utils";
 import { Screen } from "./Screen";
 import { VerifyCodeScreen } from "./VerifyCodeScreen";
 import "./ButtonStyles.css";
@@ -36,9 +41,15 @@ export function EmailLoginScreen(props: EmailLoginScreenProps) {
 		username: string,
 	): Promise<EmailLoginResult | null> {
 		try {
+			const headers: Record<string, string> = {
+				"Content-Type": "application/json",
+			};
+			const pendingId = getEmailPendingId();
+			if (pendingId) headers["x-email-pending"] = pendingId;
+
 			const response = await apiFetch("/api/auth/email/complete", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers,
 				body: JSON.stringify({ username }),
 				credentials: "include",
 			});
@@ -48,7 +59,13 @@ export function EmailLoginScreen(props: EmailLoginScreenProps) {
 			const data = (await response.json()) as {
 				user: { id: number; username: string };
 				needsPasskeySetup: boolean;
+				sessionToken?: string;
 			};
+
+			if (data.sessionToken) {
+				setNativeSessionToken(data.sessionToken);
+			}
+			setEmailPendingId(null);
 
 			return {
 				status: "authenticated",
@@ -120,17 +137,29 @@ export function EmailLoginScreen(props: EmailLoginScreenProps) {
 			const data = (await response.json()) as
 				| {
 						status: "choose_username";
+						pendingId?: string;
 				  }
 				| {
 						status: "authenticated";
 						user: { id: number; username: string };
 						needsPasskeySetup: boolean;
+						sessionToken?: string;
 				  }
 				| { error: string };
 
 			if (!response.ok) {
 				setError((data as { error: string }).error || "Verification failed");
 				return;
+			}
+
+			if ("status" in data && data.status === "authenticated") {
+				if (data.sessionToken) {
+					setNativeSessionToken(data.sessionToken);
+				}
+			} else if ("status" in data && data.status === "choose_username") {
+				if (data.pendingId) {
+					setEmailPendingId(data.pendingId);
+				}
 			}
 
 			const result = data as EmailLoginResult;

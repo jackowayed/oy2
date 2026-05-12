@@ -254,6 +254,7 @@ export function registerEmailRoutes(app: App) {
 					status: "authenticated",
 					user: authUserPayload(user),
 					needsPasskeySetup: false,
+					sessionToken,
 				});
 			}
 
@@ -266,6 +267,7 @@ export function registerEmailRoutes(app: App) {
 				status: "authenticated",
 				user: authUserPayload(user),
 				needsPasskeySetup: passkeys.rows.length === 0,
+				sessionToken,
 			});
 		}
 
@@ -286,6 +288,7 @@ export function registerEmailRoutes(app: App) {
 				status: "authenticated",
 				user: authUserPayload(user),
 				needsPasskeySetup: false,
+				sessionToken,
 			});
 		}
 
@@ -305,12 +308,13 @@ export function registerEmailRoutes(app: App) {
 			maxAge: 600,
 		});
 
-		return c.json({ status: "choose_username" });
+		return c.json({ status: "choose_username", pendingId });
 	});
 
 	// Complete registration with username (for new email users)
 	app.post("/api/auth/email/complete", async (c: AppContext) => {
-		const pendingId = getCookie(c, "email_pending");
+		const pendingId =
+			getCookie(c, "email_pending") || c.req.header("x-email-pending");
 		if (!pendingId) {
 			return c.json({ error: "No pending email registration" }, 400);
 		}
@@ -389,6 +393,7 @@ export function registerEmailRoutes(app: App) {
 				user: authUserPayload(existingUser),
 				claimed: true,
 				needsPasskeySetup: true,
+				sessionToken,
 			});
 		}
 
@@ -414,6 +419,7 @@ export function registerEmailRoutes(app: App) {
 		return c.json({
 			user: authUserPayload(user),
 			needsPasskeySetup: true,
+			sessionToken,
 		});
 	});
 
@@ -542,7 +548,8 @@ export function registerEmailRoutes(app: App) {
 
 	// Get pending email info (for username selection screen)
 	app.get("/api/auth/email/pending", async (c: AppContext) => {
-		const pendingId = getCookie(c, "email_pending");
+		const pendingId =
+			getCookie(c, "email_pending") || c.req.header("x-email-pending");
 		if (!pendingId) {
 			return c.json({ error: "No pending email registration" }, 400);
 		}

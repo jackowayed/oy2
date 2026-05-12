@@ -3,7 +3,9 @@ import { createSignal, onMount, Show } from "solid-js";
 import { appLogoText } from "../branding";
 import {
 	apiFetch,
+	getEmailPendingId,
 	getOauthPendingId,
+	setEmailPendingId,
 	setNativeSessionToken,
 	setOauthPendingId,
 } from "../utils";
@@ -56,8 +58,13 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 		}
 
 		try {
+			const emailPendingId = getEmailPendingId();
+			const emailHeaders: Record<string, string> = emailPendingId
+				? { "x-email-pending": emailPendingId }
+				: {};
 			const emailResponse = await apiFetch("/api/auth/email/pending", {
 				credentials: "include",
+				headers: emailHeaders,
 			});
 			if (emailResponse.ok) {
 				const data = (await emailResponse.json()) as {
@@ -96,6 +103,9 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 			if (isOauth) {
 				const pendingId = getOauthPendingId();
 				if (pendingId) headers["x-oauth-pending"] = pendingId;
+			} else {
+				const pendingId = getEmailPendingId();
+				if (pendingId) headers["x-email-pending"] = pendingId;
 			}
 
 			const response = await apiFetch(endpoint, {
@@ -125,11 +135,13 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 				claimed?: boolean;
 				sessionToken?: string;
 			};
-			if (isOauth && result.sessionToken) {
+			if (result.sessionToken) {
 				setNativeSessionToken(result.sessionToken);
 			}
 			if (isOauth) {
 				setOauthPendingId(null);
+			} else {
+				setEmailPendingId(null);
 			}
 			props.onComplete(result.user, result.needsPasskeySetup);
 		} catch {

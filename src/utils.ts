@@ -41,6 +41,20 @@ export function getOauthPendingId(): string | null {
 	return sessionStorage.getItem(OAUTH_PENDING_ID_KEY);
 }
 
+const EMAIL_PENDING_ID_KEY = "email_pending_id";
+
+export function setEmailPendingId(id: string | null): void {
+	if (id) {
+		sessionStorage.setItem(EMAIL_PENDING_ID_KEY, id);
+	} else {
+		sessionStorage.removeItem(EMAIL_PENDING_ID_KEY);
+	}
+}
+
+export function getEmailPendingId(): string | null {
+	return sessionStorage.getItem(EMAIL_PENDING_ID_KEY);
+}
+
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 	const url = resolveApiUrl(path);
 	if (Capacitor.isNativePlatform() && path.startsWith("/api/")) {
