@@ -9,7 +9,7 @@ import {
 	logPasskeyEvent,
 	logPasskeyStart,
 } from "../passkeyDebug";
-import { apiFetch, setNativeSessionToken } from "../utils";
+import { apiFetch, setNativeSessionToken, setOauthPendingId } from "../utils";
 import { Screen } from "./Screen";
 import "./ButtonStyles.css";
 import "./FormControls.css";
@@ -135,7 +135,7 @@ export function LoginScreen(props: LoginScreenProps) {
 
 			const data = (await response.json()) as
 				| { user: unknown; needsPasskeySetup?: boolean; sessionToken?: string }
-				| { needsUsername: true }
+				| { needsUsername: true; pendingId?: string }
 				| { error: string };
 
 			if (!response.ok) {
@@ -144,6 +144,9 @@ export function LoginScreen(props: LoginScreenProps) {
 			}
 
 			if ("needsUsername" in data && data.needsUsername) {
+				if (data.pendingId) {
+					setOauthPendingId(data.pendingId);
+				}
 				window.location.href = "/?choose_username=1";
 				return;
 			}
@@ -209,7 +212,7 @@ export function LoginScreen(props: LoginScreenProps) {
 
 			const data = (await response.json()) as
 				| { user: unknown; needsPasskeySetup?: boolean; sessionToken?: string }
-				| { needsUsername: true }
+				| { needsUsername: true; pendingId?: string }
 				| { error: string };
 
 			if (!response.ok) {
@@ -218,6 +221,9 @@ export function LoginScreen(props: LoginScreenProps) {
 			}
 
 			if ("needsUsername" in data && data.needsUsername) {
+				if (data.pendingId) {
+					setOauthPendingId(data.pendingId);
+				}
 				window.location.href = "/?choose_username=1";
 				return;
 			}

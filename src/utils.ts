@@ -27,6 +27,20 @@ export function getNativeSessionToken(): string | null {
 	return localStorage.getItem(NATIVE_SESSION_TOKEN_KEY);
 }
 
+const OAUTH_PENDING_ID_KEY = "oauth_pending_id";
+
+export function setOauthPendingId(id: string | null): void {
+	if (id) {
+		sessionStorage.setItem(OAUTH_PENDING_ID_KEY, id);
+	} else {
+		sessionStorage.removeItem(OAUTH_PENDING_ID_KEY);
+	}
+}
+
+export function getOauthPendingId(): string | null {
+	return sessionStorage.getItem(OAUTH_PENDING_ID_KEY);
+}
+
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 	const url = resolveApiUrl(path);
 	if (Capacitor.isNativePlatform() && path.startsWith("/api/")) {

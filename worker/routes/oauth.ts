@@ -621,7 +621,8 @@ export function registerOAuthRoutes(app: App) {
 
 	// Complete registration with username
 	app.post("/api/auth/oauth/complete", async (c: AppContext) => {
-		const pendingId = getCookie(c, "oauth_pending");
+		const pendingId =
+			getCookie(c, "oauth_pending") || c.req.header("x-oauth-pending");
 		if (!pendingId) {
 			return c.json({ error: "No pending OAuth registration" }, 400);
 		}
@@ -702,6 +703,7 @@ export function registerOAuthRoutes(app: App) {
 				user: authUserPayload(existingUser),
 				claimed: true,
 				needsPasskeySetup: true,
+				sessionToken,
 			});
 		}
 
@@ -727,12 +729,14 @@ export function registerOAuthRoutes(app: App) {
 		return c.json({
 			user: authUserPayload(user),
 			needsPasskeySetup: true,
+			sessionToken,
 		});
 	});
 
 	// Get pending OAuth info (for username selection screen)
 	app.get("/api/auth/oauth/pending", async (c: AppContext) => {
-		const pendingId = getCookie(c, "oauth_pending");
+		const pendingId =
+			getCookie(c, "oauth_pending") || c.req.header("x-oauth-pending");
 		if (!pendingId) {
 			return c.json({ error: "No pending OAuth registration" }, 400);
 		}
@@ -858,7 +862,7 @@ export function registerOAuthRoutes(app: App) {
 			maxAge: 600,
 		});
 
-		return c.json({ needsUsername: true });
+		return c.json({ needsUsername: true, pendingId });
 	});
 
 	// Native Google Sign-In: accept ID token directly (no redirect flow)
@@ -951,6 +955,6 @@ export function registerOAuthRoutes(app: App) {
 			maxAge: 600,
 		});
 
-		return c.json({ needsUsername: true });
+		return c.json({ needsUsername: true, pendingId });
 	});
 }

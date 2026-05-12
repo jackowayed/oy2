@@ -1,7 +1,12 @@
 import { Button } from "@kobalte/core/button";
 import { createSignal, onMount, Show } from "solid-js";
 import { appLogoText } from "../branding";
-import { apiFetch } from "../utils";
+import {
+	apiFetch,
+	getOauthPendingId,
+	setNativeSessionToken,
+	setOauthPendingId,
+} from "../utils";
 import { Screen } from "./Screen";
 import "./ButtonStyles.css";
 import "./FormControls.css";
@@ -27,10 +32,15 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 	const [submitting, setSubmitting] = createSignal(false);
 
 	onMount(async () => {
+		const oauthPendingId = getOauthPendingId();
+		const oauthHeaders: Record<string, string> = oauthPendingId
+			? { "x-oauth-pending": oauthPendingId }
+			: {};
 		// Try OAuth pending first, then email pending
 		try {
 			const oauthResponse = await apiFetch("/api/auth/oauth/pending", {
 				credentials: "include",
+				headers: oauthHeaders,
 			});
 			if (oauthResponse.ok) {
 				const data = (await oauthResponse.json()) as {
@@ -75,14 +85,22 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 		try {
 			// Use the appropriate endpoint based on the pending source
 			const info = pendingInfo();
-			const endpoint =
-				info?.source === "email"
-					? "/api/auth/email/complete"
-					: "/api/auth/oauth/complete";
+			const isOauth = info?.source !== "email";
+			const endpoint = isOauth
+				? "/api/auth/oauth/complete"
+				: "/api/auth/email/complete";
+
+			const headers: Record<string, string> = {
+				"Content-Type": "application/json",
+			};
+			if (isOauth) {
+				const pendingId = getOauthPendingId();
+				if (pendingId) headers["x-oauth-pending"] = pendingId;
+			}
 
 			const response = await apiFetch(endpoint, {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers,
 				body: JSON.stringify({ username }),
 				credentials: "include",
 			});
@@ -92,6 +110,7 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 						user: { id: number; username: string };
 						needsPasskeySetup: boolean;
 						claimed?: boolean;
+						sessionToken?: string;
 				  }
 				| { error: string };
 
@@ -104,7 +123,14 @@ export function ChooseUsernameScreen(props: ChooseUsernameScreenProps) {
 				user: { id: number; username: string };
 				needsPasskeySetup: boolean;
 				claimed?: boolean;
+				sessionToken?: string;
 			};
+			if (isOauth && result.sessionToken) {
+				setNativeSessionToken(result.sessionToken);
+			}
+			if (isOauth) {
+				setOauthPendingId(null);
+			}
 			props.onComplete(result.user, result.needsPasskeySetup);
 		} catch {
 			setError("Something went wrong. Please try again.");
