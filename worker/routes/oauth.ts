@@ -805,6 +805,7 @@ export function registerOAuthRoutes(app: App) {
 			return c.json({
 				user: authUserPayload(user),
 				needsPasskeySetup: passkeys.rows.length === 0,
+				sessionToken,
 			});
 		}
 
@@ -829,6 +830,7 @@ export function registerOAuthRoutes(app: App) {
 				return c.json({
 					user: authUserPayload(user),
 					needsPasskeySetup: true,
+					sessionToken,
 				});
 			}
 
@@ -896,6 +898,7 @@ export function registerOAuthRoutes(app: App) {
 			return c.json({
 				user: authUserPayload(user),
 				needsPasskeySetup: passkeys.rows.length === 0,
+				sessionToken,
 			});
 		}
 
@@ -920,6 +923,7 @@ export function registerOAuthRoutes(app: App) {
 				return c.json({
 					user: authUserPayload(user),
 					needsPasskeySetup: true,
+					sessionToken,
 				});
 			}
 

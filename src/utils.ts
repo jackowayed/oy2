@@ -11,8 +11,35 @@ export function resolveApiUrl(path: string): string {
 	return path;
 }
 
+const NATIVE_SESSION_TOKEN_KEY = "native_session_token";
+
+export function setNativeSessionToken(token: string | null): void {
+	if (!Capacitor.isNativePlatform()) return;
+	if (token) {
+		localStorage.setItem(NATIVE_SESSION_TOKEN_KEY, token);
+	} else {
+		localStorage.removeItem(NATIVE_SESSION_TOKEN_KEY);
+	}
+}
+
+export function getNativeSessionToken(): string | null {
+	if (!Capacitor.isNativePlatform()) return null;
+	return localStorage.getItem(NATIVE_SESSION_TOKEN_KEY);
+}
+
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-	return fetch(resolveApiUrl(path), init);
+	const url = resolveApiUrl(path);
+	if (Capacitor.isNativePlatform() && path.startsWith("/api/")) {
+		const token = getNativeSessionToken();
+		if (token) {
+			const headers = new Headers(init?.headers);
+			if (!headers.has("Authorization")) {
+				headers.set("Authorization", `Bearer ${token}`);
+			}
+			return fetch(url, { ...init, headers });
+		}
+	}
+	return fetch(url, init);
 }
 
 export function urlBase64ToUint8Array(base64String: string) {

@@ -64,9 +64,13 @@ app.use("*", async (c: AppContext, next) => {
 app.use("*", async (c: AppContext, next) => {
 	c.set("user", null);
 	c.set("sessionToken", null);
-	// Prefer cookie, fall back to header for tests
+	// Prefer cookie, fall back to Authorization: Bearer (native clients) or x-session-token (tests)
+	const authHeader = c.req.header("authorization") || c.req.header("Authorization");
+	const bearerToken = authHeader?.startsWith("Bearer ")
+		? authHeader.slice(7).trim()
+		: undefined;
 	const sessionToken =
-		getCookie(c, "session") || c.req.header("x-session-token");
+		getCookie(c, "session") || bearerToken || c.req.header("x-session-token");
 	if (sessionToken) {
 		try {
 			const verified = await verifyAuthJwt(c, sessionToken);

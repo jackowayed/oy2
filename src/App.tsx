@@ -33,7 +33,12 @@ import type {
 	OysCursor,
 	User,
 } from "./types";
-import { apiFetch, onAppVisible, urlBase64ToUint8Array } from "./utils";
+import {
+	apiFetch,
+	onAppVisible,
+	setNativeSessionToken,
+	urlBase64ToUint8Array,
+} from "./utils";
 import "./App.css";
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -1008,6 +1013,7 @@ export default function App(props: AppProps) {
 
 	function clearSessionState() {
 		setCurrentUser(null);
+		setNativeSessionToken(null);
 		localStorage.removeItem(cachedUserStorageKey);
 		localStorage.removeItem(cachedFriendsStorageKey);
 		localStorage.removeItem(cachedLastOyInfoStorageKey);

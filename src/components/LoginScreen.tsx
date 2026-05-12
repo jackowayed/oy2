@@ -9,7 +9,7 @@ import {
 	logPasskeyEvent,
 	logPasskeyStart,
 } from "../passkeyDebug";
-import { apiFetch } from "../utils";
+import { apiFetch, setNativeSessionToken } from "../utils";
 import { Screen } from "./Screen";
 import "./ButtonStyles.css";
 import "./FormControls.css";
@@ -134,7 +134,7 @@ export function LoginScreen(props: LoginScreenProps) {
 			});
 
 			const data = (await response.json()) as
-				| { user: unknown; needsPasskeySetup?: boolean }
+				| { user: unknown; needsPasskeySetup?: boolean; sessionToken?: string }
 				| { needsUsername: true }
 				| { error: string };
 
@@ -146,6 +146,10 @@ export function LoginScreen(props: LoginScreenProps) {
 			if ("needsUsername" in data && data.needsUsername) {
 				window.location.href = "/?choose_username=1";
 				return;
+			}
+
+			if ("sessionToken" in data && data.sessionToken) {
+				setNativeSessionToken(data.sessionToken);
 			}
 
 			if ("needsPasskeySetup" in data && data.needsPasskeySetup) {
@@ -204,7 +208,7 @@ export function LoginScreen(props: LoginScreenProps) {
 			});
 
 			const data = (await response.json()) as
-				| { user: unknown; needsPasskeySetup?: boolean }
+				| { user: unknown; needsPasskeySetup?: boolean; sessionToken?: string }
 				| { needsUsername: true }
 				| { error: string };
 
@@ -216,6 +220,10 @@ export function LoginScreen(props: LoginScreenProps) {
 			if ("needsUsername" in data && data.needsUsername) {
 				window.location.href = "/?choose_username=1";
 				return;
+			}
+
+			if ("sessionToken" in data && data.sessionToken) {
+				setNativeSessionToken(data.sessionToken);
 			}
 
 			if ("needsPasskeySetup" in data && data.needsPasskeySetup) {
