@@ -247,10 +247,12 @@ export function registerOyRoutes(app: App) {
 			return c.json({ error: "Missing location" }, 400);
 		}
 
-		const existingResult = await c.get("db").query<{ payload: string | null }>(
-			"SELECT payload FROM oys WHERE id = $1 AND from_user_id = $2 AND type = 'lo' LIMIT 1",
-			[id, user.id],
-		);
+		const existingResult = await c
+			.get("db")
+			.query<{ payload: string | null }>(
+				"SELECT payload FROM oys WHERE id = $1 AND from_user_id = $2 AND type = 'lo' LIMIT 1",
+				[id, user.id],
+			);
 		const existingRow = existingResult.rows[0];
 		if (!existingRow) {
 			return c.json({ error: "Not found" }, 404);
