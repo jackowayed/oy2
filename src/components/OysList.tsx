@@ -153,13 +153,15 @@ export function OysList(props: OysListProps) {
 						// another ~20-50m. A 250m floor clears that band so a phone at the
 						// beach doesn't randomly show "100m up", while still catching
 						// mountain towns (Denver ~1600m) and ski lifts. The altitudeAccuracy
-						// filter excludes Wi-Fi/IP-derived fixes, which typically have null
-						// or huge accuracy values.
+						// filter excludes Wi-Fi/IP-derived fixes (null) and devices that
+						// return 0, which is physically impossible and indicates unreliable
+						// GPS altitude data.
 						if (
 							isLocation &&
 							payload?.altitude != null &&
 							payload.altitude > 250 &&
 							payload.altitudeAccuracy != null &&
+							payload.altitudeAccuracy > 0 &&
 							payload.altitudeAccuracy < 50
 						) {
 							subtitleParts.push(formatAltitude(payload.altitude));
