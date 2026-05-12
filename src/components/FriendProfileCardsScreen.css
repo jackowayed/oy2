@@ -64,6 +64,7 @@
 	font-family: var(--font-display);
 	font-size: clamp(1.9rem, 7vw, 2.8rem);
 	line-height: 1;
+	word-break: break-all;
 }
 
 .friend-profile-nickname-row {
