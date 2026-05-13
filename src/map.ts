@@ -19,6 +19,7 @@ L.Icon.Default.imagePath = "";
 type MapContainer = HTMLDivElement & {
 	_leafletMap?: L.Map;
 	_leafletTileLayer?: L.TileLayer;
+	_historyAdded?: boolean;
 };
 
 export type LoHistoryPoint = {
@@ -73,8 +74,9 @@ export function initLocationMap(
 	history?: LoHistoryPoint[],
 ) {
 	if (container.dataset.mapInit === "true") {
-		if (history && container._leafletMap) {
+		if (history && container._leafletMap && !container._historyAdded) {
 			addHistoryMarkers(container._leafletMap, history);
+			container._historyAdded = true;
 		}
 		return;
 	}
@@ -96,6 +98,7 @@ export function initLocationMap(
 
 	if (history && history.length > 0) {
 		addHistoryMarkers(map, history);
+		container._historyAdded = true;
 	}
 
 	L.marker([lat, lon]).addTo(map);
@@ -121,7 +124,8 @@ function addHistoryMarkers(map: L.Map, history: LoHistoryPoint[]) {
 	const accent = getCssVar("--accent", "#f59e0b");
 
 	for (const point of history) {
-		const t = point.intensity;
+		// Cubic curve compresses old points toward purple, spreading recent ones across the color range.
+		const t = Math.pow(point.intensity, 3);
 		const color = interpolateColor(primary, accent, t);
 		L.circleMarker([point.lat, point.lon], {
 			radius: lerp(3, 7, t),

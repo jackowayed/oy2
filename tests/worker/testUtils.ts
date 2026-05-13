@@ -1559,17 +1559,18 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 				"SELECT payload, created_at FROM oys WHERE from_user_id = ? AND to_user_id = ? AND type = 'lo' AND payload IS NOT NULL",
 			)
 		) {
-			const [fromUserId, toUserId, limit] = this.params as [number, number, number];
+			const [fromUserId, toUserId, before] = this.params as [number, number, number | undefined];
 			const results = this.db.oys
 				.filter(
 					(row) =>
 						row.from_user_id === fromUserId &&
 						row.to_user_id === toUserId &&
 						row.type === "lo" &&
-						row.payload !== null,
+						row.payload !== null &&
+						(before === undefined || row.created_at <= before),
 				)
 				.sort((a, b) => b.created_at - a.created_at)
-				.slice(0, limit)
+				.slice(0, 50)
 				.map((row) => ({ payload: row.payload, created_at: row.created_at }));
 			return { results };
 		}

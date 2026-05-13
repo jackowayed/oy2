@@ -129,7 +129,7 @@ export function OysList(props: OysListProps) {
 			oy.from_user_id === props.currentUserId ? oy.to_user_id : oy.from_user_id;
 		try {
 			const response = await props.api<LoHistoryResponse>(
-				`/api/lo/history?friendId=${friendId}&direction=${direction}`,
+				`/api/lo/history?friendId=${friendId}&direction=${direction}&before=${oy.created_at}`,
 			);
 			setHistoryCache((prev) => {
 				const next = new Map(prev);
