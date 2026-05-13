@@ -36,7 +36,7 @@ app.use(
 			"http://127.0.0.1",
 		],
 		allowHeaders: ["Content-Type", "X-Session-Token"],
-		allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+		allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 		credentials: true,
 	}),
 );

@@ -293,6 +293,54 @@ export function registerOyRoutes(app: App) {
 		return c.json({ success: true });
 	});
 
+	app.get("/api/lo/history", async (c: AppContext) => {
+		const user = c.get("user");
+		if (!user) {
+			return c.json({ error: "Not authenticated" }, 401);
+		}
+
+		const friendIdRaw = c.req.query("friendId");
+		const direction = c.req.query("direction");
+		const friendId = friendIdRaw ? Number(friendIdRaw) : Number.NaN;
+
+		if (!Number.isFinite(friendId)) {
+			return c.json({ error: "Missing friendId" }, 400);
+		}
+		if (direction !== "inbound" && direction !== "outbound") {
+			return c.json({ error: "direction must be inbound or outbound" }, 400);
+		}
+
+		const fromId = direction === "inbound" ? friendId : user.id;
+		const toId = direction === "inbound" ? user.id : friendId;
+
+		const result = await c.get("db").query<{
+			payload: string | null;
+			created_at: number;
+		}>(
+			`SELECT payload, created_at FROM oys
+			WHERE from_user_id = $1 AND to_user_id = $2 AND type = 'lo' AND payload IS NOT NULL
+			ORDER BY created_at DESC
+			LIMIT 50`,
+			[fromId, toId],
+		);
+
+		// Reverse so oldest is first (index 0), newest is last
+		const rows = result.rows.slice().reverse();
+		const locations = rows.map((row, i) => {
+			const payload = JSON.parse(row.payload as string) as {
+				lat: number;
+				lon: number;
+			};
+			return {
+				lat: payload.lat,
+				lon: payload.lon,
+				intensity: rows.length === 1 ? 1 : i / (rows.length - 1),
+			};
+		});
+
+		return c.json({ locations });
+	});
+
 	app.get("/api/oys", async (c: AppContext) => {
 		const user = c.get("user");
 		if (!user) {

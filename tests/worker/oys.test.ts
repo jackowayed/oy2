@@ -390,6 +390,194 @@ describe("oys and los", () => {
 		assert.ok(pagedBody.nextCursor);
 	});
 
+	describe("lo history", () => {
+		it("requires authentication", async () => {
+			const { env } = createTestEnv();
+			const { res } = await jsonRequest(env, "/api/lo/history?friendId=1&direction=inbound");
+			assert.equal(res.status, 401);
+		});
+
+		it("rejects missing friendId", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			seedSession(db, me.id, "history-token");
+			const { res } = await jsonRequest(env, "/api/lo/history?direction=inbound", {
+				headers: { "x-session-token": "history-token" },
+			});
+			assert.equal(res.status, 400);
+		});
+
+		it("rejects invalid direction", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const friend = seedUser(db, { username: "Friend" });
+			seedSession(db, me.id, "history-token2");
+			const { res } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=sideways`,
+				{ headers: { "x-session-token": "history-token2" } },
+			);
+			assert.equal(res.status, 400);
+		});
+
+		it("returns inbound lo history only from the specified friend", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const friend = seedUser(db, { username: "Friend" });
+			const otherFriend = seedUser(db, { username: "OtherFriend" });
+			seedSession(db, me.id, "inbound-token");
+
+			// Los from friend → me (should appear)
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":1.0,"lon":2.0}', createdAt: 100 });
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":1.1,"lon":2.1}', createdAt: 200 });
+			// Lo from otherFriend → me (must NOT appear)
+			seedOy(db, { fromUserId: otherFriend.id, toUserId: me.id, type: "lo", payload: '{"lat":9.9,"lon":9.9}', createdAt: 150 });
+			// Lo from me → friend (must NOT appear in inbound)
+			seedOy(db, { fromUserId: me.id, toUserId: friend.id, type: "lo", payload: '{"lat":8.8,"lon":8.8}', createdAt: 180 });
+
+			const { res, json } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=inbound`,
+				{ headers: { "x-session-token": "inbound-token" } },
+			);
+			const body = json as { locations: Array<{ lat: number; lon: number; intensity: number }> };
+			assert.equal(res.status, 200);
+			assert.equal(body.locations.length, 2);
+			// Oldest first (intensity 0), newest last (intensity 1)
+			assert.equal(body.locations[0].intensity, 0);
+			assert.equal(body.locations[1].intensity, 1);
+			// Verify coordinates match friend's los only
+			const lats = body.locations.map((l) => l.lat);
+			assert.ok(lats.includes(1.0));
+			assert.ok(lats.includes(1.1));
+			assert.ok(!lats.includes(9.9)); // otherFriend excluded
+			assert.ok(!lats.includes(8.8)); // outbound excluded
+		});
+
+		it("returns outbound lo history only to the specified friend", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const friend = seedUser(db, { username: "Friend" });
+			const otherFriend = seedUser(db, { username: "OtherFriend" });
+			seedSession(db, me.id, "outbound-token");
+
+			// Los from me → friend (should appear)
+			seedOy(db, { fromUserId: me.id, toUserId: friend.id, type: "lo", payload: '{"lat":3.0,"lon":4.0}', createdAt: 100 });
+			seedOy(db, { fromUserId: me.id, toUserId: friend.id, type: "lo", payload: '{"lat":3.1,"lon":4.1}', createdAt: 200 });
+			// Lo from me → otherFriend (must NOT appear)
+			seedOy(db, { fromUserId: me.id, toUserId: otherFriend.id, type: "lo", payload: '{"lat":9.9,"lon":9.9}', createdAt: 150 });
+			// Lo from friend → me (must NOT appear in outbound)
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":8.8,"lon":8.8}', createdAt: 180 });
+
+			const { res, json } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=outbound`,
+				{ headers: { "x-session-token": "outbound-token" } },
+			);
+			const body = json as { locations: Array<{ lat: number; lon: number; intensity: number }> };
+			assert.equal(res.status, 200);
+			assert.equal(body.locations.length, 2);
+			const lats = body.locations.map((l) => l.lat);
+			assert.ok(lats.includes(3.0));
+			assert.ok(lats.includes(3.1));
+			assert.ok(!lats.includes(9.9)); // sent to wrong friend excluded
+			assert.ok(!lats.includes(8.8)); // inbound excluded
+		});
+
+		it("excludes plain oys and los without payload", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const friend = seedUser(db, { username: "Friend" });
+			seedSession(db, me.id, "payload-token");
+
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":5.0,"lon":6.0}', createdAt: 100 });
+			// Plain oy (type oy, no payload) — must not appear
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "oy", payload: null, createdAt: 200 });
+			// Lo with null payload — must not appear
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: null, createdAt: 300 });
+
+			const { res, json } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=inbound`,
+				{ headers: { "x-session-token": "payload-token" } },
+			);
+			const body = json as { locations: Array<{ lat: number; lon: number }> };
+			assert.equal(res.status, 200);
+			assert.equal(body.locations.length, 1);
+			assert.equal(body.locations[0].lat, 5.0);
+		});
+
+		it("encodes intensity correctly: single point gets 1, oldest 0 newest 1 for multiple", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const friend = seedUser(db, { username: "Friend" });
+			seedSession(db, me.id, "intensity-token");
+
+			// Single lo
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":1.0,"lon":1.0}', createdAt: 100 });
+			const { json: singleJson } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=inbound`,
+				{ headers: { "x-session-token": "intensity-token" } },
+			);
+			const single = singleJson as { locations: Array<{ intensity: number }> };
+			assert.equal(single.locations.length, 1);
+			assert.equal(single.locations[0].intensity, 1);
+
+			// Three los total (including the one already seeded): oldest, middle, newest
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":2.0,"lon":2.0}', createdAt: 200 });
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":3.0,"lon":3.0}', createdAt: 300 });
+			const { json: multiJson } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=inbound`,
+				{ headers: { "x-session-token": "intensity-token" } },
+			);
+			const multi = multiJson as { locations: Array<{ intensity: number; lat: number }> };
+			assert.equal(multi.locations.length, 3);
+			// Sorted oldest→newest, so index 0 = oldest (createdAt 100, intensity 0)
+			assert.equal(multi.locations[0].lat, 1.0);
+			assert.equal(multi.locations[0].intensity, 0);
+			// Index 2 = newest (createdAt 300, intensity 1)
+			assert.equal(multi.locations[2].lat, 3.0);
+			assert.equal(multi.locations[2].intensity, 1);
+			// Middle intensity is between 0 and 1
+			assert.ok(multi.locations[1].intensity > 0 && multi.locations[1].intensity < 1);
+		});
+
+		it("cannot fetch another user's location history by spoofing friendId", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const alice = seedUser(db, { username: "Alice" });
+			const bob = seedUser(db, { username: "Bob" });
+			seedSession(db, me.id, "spoof-token");
+
+			// Lo from alice → bob (neither party is me)
+			seedOy(db, { fromUserId: alice.id, toUserId: bob.id, type: "lo", payload: '{"lat":7.0,"lon":8.0}', createdAt: 100 });
+
+			// Requesting inbound with friendId=alice means: from_user_id=alice, to_user_id=me
+			// alice→bob should NOT appear since to_user_id=bob ≠ me
+			const { res: inRes, json: inJson } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${alice.id}&direction=inbound`,
+				{ headers: { "x-session-token": "spoof-token" } },
+			);
+			const inBody = inJson as { locations: unknown[] };
+			assert.equal(inRes.status, 200);
+			assert.equal(inBody.locations.length, 0);
+
+			// Requesting outbound with friendId=bob means: from_user_id=me, to_user_id=bob
+			// alice→bob should NOT appear since from_user_id=alice ≠ me
+			const { res: outRes, json: outJson } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${bob.id}&direction=outbound`,
+				{ headers: { "x-session-token": "spoof-token" } },
+			);
+			const outBody = outJson as { locations: unknown[] };
+			assert.equal(outRes.status, 200);
+			assert.equal(outBody.locations.length, 0);
+		});
+	});
+
 	it("excludes oys between blocked users from fetch results", async () => {
 		const { env, db } = createTestEnv();
 		const me = seedUser(db, { username: "Viewer" });
