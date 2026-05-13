@@ -1,7 +1,14 @@
 import { Capacitor } from "@capacitor/core";
 import { Geolocation as CapacitorGeolocation } from "@capacitor/geolocation";
 import { Button } from "@kobalte/core/button";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+	createEffect,
+	createSignal,
+	For,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
 import { useAppContext } from "../AppContext";
 import type { LoHistoryPoint } from "../map";
 import type { Oy, OyPayload } from "../types";
@@ -50,10 +57,7 @@ export function OysList(props: OysListProps) {
 	onCleanup(() => window.clearInterval(intervalId));
 	onCleanup(onAppVisible(() => setTimeTick(Date.now())));
 
-	let sentinel: HTMLDivElement | undefined;
-	const setSentinel = (el: HTMLDivElement) => {
-		sentinel = el;
-	};
+	const [sentinel, setSentinel] = createSignal<HTMLDivElement | undefined>();
 
 	onMount(() => {
 		// watchPosition fires immediately with any cached position, then
@@ -94,21 +98,7 @@ export function OysList(props: OysListProps) {
 			);
 		}
 
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries[0]?.isIntersecting && props.hasMore()) {
-					props.onLoadMore();
-				}
-			},
-			{ rootMargin: "200px" },
-		);
-
-		if (sentinel) {
-			observer.observe(sentinel);
-		}
-
 		onCleanup(() => {
-			observer.disconnect();
 			if (Capacitor.isNativePlatform()) {
 				if (watchId !== undefined) {
 					CapacitorGeolocation.clearWatch({ id: watchId as unknown as string });
@@ -117,6 +107,21 @@ export function OysList(props: OysListProps) {
 				navigator.geolocation.clearWatch(watchId);
 			}
 		});
+	});
+
+	createEffect(() => {
+		const el = sentinel();
+		if (!el) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0]?.isIntersecting && props.hasMore()) {
+					props.onLoadMore();
+				}
+			},
+			{ rootMargin: "200px" },
+		);
+		observer.observe(el);
+		onCleanup(() => observer.disconnect());
 	});
 
 	const fetchHistory = async (oy: Oy) => {
