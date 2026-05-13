@@ -9,6 +9,8 @@ export type LocationPermissionNotice = {
 
 export type AppContextValue = {
 	currentUser: Accessor<User | null>;
+	useImperial: Accessor<boolean>;
+	setUseImperial: (imperial: boolean) => void;
 	friends: Accessor<Friend[]>;
 	friendsWithLastOy: Accessor<FriendWithLastOy[]>;
 	lastOyInfo: Accessor<LastOyInfo[]>;

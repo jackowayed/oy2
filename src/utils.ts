@@ -107,11 +107,26 @@ export function onAppVisible(callback: () => void) {
 	};
 }
 
+const UNITS_KEY = "use_imperial";
+
+export function getUseImperial(): boolean {
+	return localStorage.getItem(UNITS_KEY) === "1";
+}
+
+export function setUseImperial(imperial: boolean): void {
+	if (imperial) {
+		localStorage.setItem(UNITS_KEY, "1");
+	} else {
+		localStorage.removeItem(UNITS_KEY);
+	}
+}
+
 export function calculateDistance(
 	lat1: number,
 	lon1: number,
 	lat2: number,
 	lon2: number,
+	imperial = false,
 ): string {
 	const R = 6371; // Radius of the earth in km
 	const dLat = deg2rad(lat2 - lat1);
@@ -125,25 +140,56 @@ export function calculateDistance(
 	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 	const d = R * c; // Distance in km
 
-	if (d < 1) {
-		return `${Math.round(d * 1000)}m`;
+	const fmtDecimal = (n: number) =>
+		n.toLocaleString(undefined, {
+			minimumFractionDigits: 1,
+			maximumFractionDigits: 1,
+		});
+	const fmtInt = (n: number) => Math.round(n).toLocaleString();
+
+	if (imperial) {
+		const miles = d * 0.621371;
+		if (miles < 0.1) {
+			return `${fmtInt(miles * 5280)}ft`;
+		}
+		return `${fmtDecimal(miles)}mi`;
 	}
-	return `${d.toFixed(1)}km`;
+	if (d < 1) {
+		return `${fmtInt(d * 1000)}m`;
+	}
+	return `${fmtDecimal(d)}km`;
 }
 
 function deg2rad(deg: number) {
 	return deg * (Math.PI / 180);
 }
 
-export function formatAltitude(meters: number): string {
-	if (meters < 1000) {
-		return `${Math.round(meters / 10) * 10}m up`;
+export function formatAltitude(meters: number, imperial = false): string {
+	const fmtDecimal = (n: number) =>
+		n.toLocaleString(undefined, {
+			minimumFractionDigits: 1,
+			maximumFractionDigits: 1,
+		});
+	const fmtInt = (n: number) => Math.round(n).toLocaleString();
+
+	if (imperial) {
+		const feet = meters * 3.28084;
+		if (feet < 5280) {
+			return `${fmtInt(Math.round(feet / 10) * 10)}ft up`;
+		}
+		return `${fmtDecimal(feet / 5280)}mi up`;
 	}
-	return `${(meters / 1000).toFixed(1)}km up`;
+	if (meters < 1000) {
+		return `${fmtInt(Math.round(meters / 10) * 10)}m up`;
+	}
+	return `${fmtDecimal(meters / 1000)}km up`;
 }
 
-export function formatSpeed(metersPerSecond: number): string {
-	return `${Math.round(metersPerSecond * 3.6)}km/h`;
+export function formatSpeed(metersPerSecond: number, imperial = false): string {
+	if (imperial) {
+		return `${Math.round(metersPerSecond * 2.23694).toLocaleString()}mph`;
+	}
+	return `${Math.round(metersPerSecond * 3.6).toLocaleString()}km/h`;
 }
 
 export function buildMapsDeepLink(lat: number, lon: number): string {

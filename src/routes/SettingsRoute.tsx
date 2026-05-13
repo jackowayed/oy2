@@ -6,8 +6,15 @@ import { SettingsScreen } from "../components/SettingsScreen";
 import type { User } from "../types";
 
 export function SettingsRoute() {
-	const { currentUser, logout, deleteAccount, handleSetupNotifications, api } =
-		useAppContext();
+	const {
+		currentUser,
+		logout,
+		deleteAccount,
+		handleSetupNotifications,
+		api,
+		useImperial,
+		setUseImperial,
+	} = useAppContext();
 	const user = () => currentUser() as User;
 
 	onMount(() => {
@@ -23,6 +30,8 @@ export function SettingsRoute() {
 			<AppHeader backHref="/" user={user()} onLogout={logout} />
 			<SettingsScreen
 				user={user()}
+				useImperial={useImperial()}
+				onSetUseImperial={setUseImperial}
 				onSetupNotifications={handleSetupNotifications}
 				onDeleteAccount={deleteAccount}
 				api={api}
