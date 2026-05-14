@@ -127,8 +127,8 @@ function addHistoryMarkers(map: L.Map, history: LoHistoryPoint[]) {
 			radius: lerp(3, 7, t),
 			color,
 			fillColor: color,
-			fillOpacity: lerpf(0.2, 0.85, t),
-			opacity: lerpf(0.3, 1, t),
+			fillOpacity: lerpf(prefersDark() ? 0.45 : 0.2, 0.85, t),
+			opacity: lerpf(prefersDark() ? 0.45 : 0.3, 1, t),
 			weight: lerpf(0.5, 2, t),
 		}).addTo(map);
 	}
