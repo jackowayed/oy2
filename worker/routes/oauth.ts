@@ -457,7 +457,7 @@ export function registerOAuthRoutes(app: App) {
 
 		// Check if user exists with this OAuth identity
 		const existingUser = await c
-			.get("db")
+			.get("dbNoCache")
 			.query<User>(
 				"SELECT * FROM users WHERE oauth_provider = $1 AND oauth_sub = $2",
 				[provider, oauthSub],
@@ -586,7 +586,7 @@ export function registerOAuthRoutes(app: App) {
 
 		// Check if user exists
 		const existingUser = await c
-			.get("db")
+			.get("dbNoCache")
 			.query<User>(
 				"SELECT * FROM users WHERE oauth_provider = $1 AND oauth_sub = $2",
 				["google", verified.sub],
@@ -821,7 +821,7 @@ export function registerOAuthRoutes(app: App) {
 
 		// Check if user already exists with this Apple identity
 		const existingUser = await c
-			.get("db")
+			.get("dbNoCache")
 			.query<User>(
 				"SELECT * FROM users WHERE oauth_provider = $1 AND oauth_sub = $2",
 				["apple", verified.sub],
@@ -917,7 +917,7 @@ export function registerOAuthRoutes(app: App) {
 
 		// Check if user already exists with this Google identity
 		const existingUser = await c
-			.get("db")
+			.get("dbNoCache")
 			.query<User>(
 				"SELECT * FROM users WHERE oauth_provider = $1 AND oauth_sub = $2",
 				["google", verified.sub],
