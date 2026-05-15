@@ -544,6 +544,31 @@ describe("oys and los", () => {
 			assert.ok(multi.locations[1].intensity > 0 && multi.locations[1].intensity < 1);
 		});
 
+		it("filters to locations at or before the given before timestamp, renormalizing intensity", async () => {
+			const { env, db } = createTestEnv();
+			const me = seedUser(db, { username: "Me" });
+			const friend = seedUser(db, { username: "Friend" });
+			seedSession(db, me.id, "before-token");
+
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":1.0,"lon":1.0}', createdAt: 100 });
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":2.0,"lon":2.0}', createdAt: 200 });
+			seedOy(db, { fromUserId: friend.id, toUserId: me.id, type: "lo", payload: '{"lat":3.0,"lon":3.0}', createdAt: 300 });
+
+			// before=200 should return only createdAt 100 and 200, with intensity re-normalized
+			const { res, json } = await jsonRequest(
+				env,
+				`/api/lo/history?friendId=${friend.id}&direction=inbound&before=200`,
+				{ headers: { "x-session-token": "before-token" } },
+			);
+			const body = json as { locations: Array<{ lat: number; intensity: number }> };
+			assert.equal(res.status, 200);
+			assert.equal(body.locations.length, 2);
+			assert.equal(body.locations[0].lat, 1.0);
+			assert.equal(body.locations[0].intensity, 0); // oldest
+			assert.equal(body.locations[1].lat, 2.0);
+			assert.equal(body.locations[1].intensity, 1); // newest = the current lo, always 1
+		});
+
 		it("cannot fetch another user's location history by spoofing friendId", async () => {
 			const { env, db } = createTestEnv();
 			const me = seedUser(db, { username: "Me" });

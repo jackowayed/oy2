@@ -301,7 +301,9 @@ export function registerOyRoutes(app: App) {
 
 		const friendIdRaw = c.req.query("friendId");
 		const direction = c.req.query("direction");
+		const beforeRaw = c.req.query("before");
 		const friendId = friendIdRaw ? Number(friendIdRaw) : Number.NaN;
+		const before = beforeRaw ? Number(beforeRaw) : undefined;
 
 		if (!Number.isFinite(friendId)) {
 			return c.json({ error: "Missing friendId" }, 400);
@@ -313,15 +315,19 @@ export function registerOyRoutes(app: App) {
 		const fromId = direction === "inbound" ? friendId : user.id;
 		const toId = direction === "inbound" ? user.id : friendId;
 
+		const params: (number | undefined)[] = [fromId, toId];
+		const beforeClause =
+			before !== undefined ? `AND created_at <= $${params.push(before)}` : "";
 		const result = await c.get("db").query<{
 			payload: string | null;
 			created_at: number;
 		}>(
 			`SELECT payload, created_at FROM oys
 			WHERE from_user_id = $1 AND to_user_id = $2 AND type = 'lo' AND payload IS NOT NULL
+			${beforeClause}
 			ORDER BY created_at DESC
 			LIMIT 50`,
-			[fromId, toId],
+			params,
 		);
 
 		// Reverse so oldest is first (index 0), newest is last
