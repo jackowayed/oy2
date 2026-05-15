@@ -38,6 +38,16 @@ async function generateState(): Promise<string> {
 	return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function existingEmailMatchesOAuthEmail(
+	existingEmail: string | null | undefined,
+	oauthEmail: string | undefined,
+) {
+	return (
+		!existingEmail ||
+		(!!oauthEmail && existingEmail.toLowerCase() === oauthEmail.toLowerCase())
+	);
+}
+
 function base64UrlDecodeString(value: string): string {
 	const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
 	const padding = "=".repeat((4 - (base64.length % 4)) % 4);
@@ -227,8 +237,9 @@ async function tryCreateOAuthUser(
 	if (existing.rows.length > 0) {
 		const existingUser = existing.rows[0];
 
-		// Can't claim if already has OAuth or passkey
+		// Can't claim if already has OAuth, a passkey, or a different email.
 		if (existingUser.oauth_provider) return null;
+		if (!existingEmailMatchesOAuthEmail(existingUser.email, email)) return null;
 		const passkeys = await c
 			.get("db")
 			.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [
@@ -670,6 +681,11 @@ export function registerOAuthRoutes(app: App) {
 
 			// If user already has OAuth linked, they can't claim it
 			if (existingUser.oauth_provider) {
+				return c.json({ error: "Username already taken" }, 400);
+			}
+
+			// If user already has a different email linked, they can't claim it via OAuth
+			if (!existingEmailMatchesOAuthEmail(existingUser.email, email)) {
 				return c.json({ error: "Username already taken" }, 400);
 			}
 

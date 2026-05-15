@@ -319,4 +319,102 @@ describe("oauth", () => {
 		assert.match(String(pending), /"provider":"apple"/);
 		assert.match(String(pending), /"name":"Native Apple User"/);
 	});
+
+	it("claims placeholder users during oauth completion", async () => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, { username: "Placeholder" });
+		await kv.put(
+			"oauth_pending:pending-claim",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-claim",
+				email: "claim@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-claim",
+			},
+			body: JSON.stringify({ username: "Placeholder" }),
+		});
+
+		assert.equal(res.status, 200);
+		const body = (await res.json()) as { claimed: boolean };
+		assert.equal(body.claimed, true);
+		assert.equal(user.oauth_provider, "google");
+		assert.equal(user.oauth_sub, "google-sub-claim");
+		assert.equal(user.email, "claim@example.com");
+		assert.equal(db.sessions.length, 1);
+		assert.equal(await kv.get("oauth_pending:pending-claim"), null);
+	});
+
+	it("claims email-linked users during oauth completion when oauth email matches", async () => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, {
+			username: "EmailLinked",
+			email: "Existing@Example.com",
+		});
+		await kv.put(
+			"oauth_pending:pending-email-linked",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-email-linked",
+				email: "existing@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-email-linked",
+			},
+			body: JSON.stringify({ username: "EmailLinked" }),
+		});
+
+		assert.equal(res.status, 200);
+		const body = (await res.json()) as { claimed: boolean };
+		assert.equal(body.claimed, true);
+		assert.equal(user.oauth_provider, "google");
+		assert.equal(user.oauth_sub, "google-sub-email-linked");
+		assert.equal(user.email, "Existing@Example.com");
+		assert.equal(db.sessions.length, 1);
+		assert.equal(await kv.get("oauth_pending:pending-email-linked"), null);
+	});
+
+	it("rejects email-linked users during oauth completion when oauth email differs", async () => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, {
+			username: "EmailLinked",
+			email: "existing@example.com",
+		});
+		await kv.put(
+			"oauth_pending:pending-email-linked",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-email-linked",
+				email: "new@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-email-linked",
+			},
+			body: JSON.stringify({ username: "EmailLinked" }),
+		});
+
+		assert.equal(res.status, 400);
+		const body = (await res.json()) as { error: string };
+		assert.equal(body.error, "Username already taken");
+		assert.equal(user.oauth_provider, null);
+		assert.equal(user.oauth_sub, null);
+		assert.equal(user.email, "existing@example.com");
+		assert.equal(db.sessions.length, 0);
+	});
 });
