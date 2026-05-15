@@ -11,7 +11,7 @@
 		"deploy": "vite build && wrangler deploy",
 		"deploy:dev": "CLOUDFLARE_ENV=dev vite build && wrangler deploy --env dev",
 		"deploy:backup": "wrangler deploy --config backup-worker/wrangler.toml",
-		"test": "tsx --test tests/worker/*.test.ts",
+		"test": "tsx --test tests/utils.test.ts tests/worker/*.test.ts",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format .",

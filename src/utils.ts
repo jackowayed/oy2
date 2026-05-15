@@ -138,7 +138,7 @@ export function calculateDistance(
 			Math.sin(dLon / 2) *
 			Math.sin(dLon / 2);
 	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-	const d = R * c; // Distance in km
+	const distanceKm = R * c;
 
 	const fmtDecimal = (n: number) =>
 		n.toLocaleString(undefined, {
@@ -148,16 +148,16 @@ export function calculateDistance(
 	const fmtInt = (n: number) => Math.round(n).toLocaleString();
 
 	if (imperial) {
-		const miles = d * 0.621371;
-		if (miles < 0.1) {
-			return `${fmtInt(miles * 5280)}ft`;
+		const feet = distanceKm * 3280.84;
+		if (feet < 1000) {
+			return `${fmtInt(feet)}ft`;
 		}
-		return `${fmtDecimal(miles)}mi`;
+		return `${fmtDecimal(feet / 5280)}mi`;
 	}
-	if (d < 1) {
-		return `${fmtInt(d * 1000)}m`;
+	if (distanceKm < 1) {
+		return `${fmtInt(distanceKm * 1000)}m`;
 	}
-	return `${fmtDecimal(d)}km`;
+	return `${fmtDecimal(distanceKm)}km`;
 }
 
 function deg2rad(deg: number) {
