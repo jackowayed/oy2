@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getCookieValue, getSessionToken, request } from "./testHelpers";
-import { createTestEnv, seedUser } from "./testUtils";
+import { createTestEnv, seedPasskey, seedUser } from "./testUtils";
 
 function encodeBase64Url(input: string | Uint8Array): string {
 	const bytes =
@@ -415,6 +415,70 @@ describe("oauth", () => {
 		assert.equal(user.oauth_provider, null);
 		assert.equal(user.oauth_sub, null);
 		assert.equal(user.email, "existing@example.com");
+		assert.equal(db.sessions.length, 0);
+	});
+
+	it("claims passkey users during oauth completion when oauth email matches", async () => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, {
+			username: "PasskeyEmailLinked",
+			email: "passkey@example.com",
+		});
+		seedPasskey(db, { userId: user.id });
+		await kv.put(
+			"oauth_pending:pending-passkey-email",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-passkey-email",
+				email: "PASSKEY@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-passkey-email",
+			},
+			body: JSON.stringify({ username: "PasskeyEmailLinked" }),
+		});
+
+		assert.equal(res.status, 200);
+		const body = (await res.json()) as { claimed: boolean };
+		assert.equal(body.claimed, true);
+		assert.equal(user.oauth_provider, "google");
+		assert.equal(user.oauth_sub, "google-sub-passkey-email");
+		assert.equal(user.email, "passkey@example.com");
+		assert.equal(db.sessions.length, 1);
+	});
+
+	it("rejects passkey users during oauth completion without matching email proof", async () => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, { username: "PasskeyOnly" });
+		seedPasskey(db, { userId: user.id });
+		await kv.put(
+			"oauth_pending:pending-passkey-only",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-passkey-only",
+				email: "passkey-only@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-passkey-only",
+			},
+			body: JSON.stringify({ username: "PasskeyOnly" }),
+		});
+
+		assert.equal(res.status, 400);
+		const body = (await res.json()) as { error: string };
+		assert.equal(body.error, "Username already taken");
+		assert.equal(user.oauth_provider, null);
+		assert.equal(user.oauth_sub, null);
 		assert.equal(db.sessions.length, 0);
 	});
 });

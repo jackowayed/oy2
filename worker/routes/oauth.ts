@@ -48,6 +48,16 @@ function existingEmailMatchesOAuthEmail(
 	);
 }
 
+function canClaimExistingUserWithOAuth(
+	user: User,
+	oauthEmail: string | undefined,
+	hasPasskey: boolean,
+) {
+	if (user.oauth_provider) return false;
+	if (user.email) return existingEmailMatchesOAuthEmail(user.email, oauthEmail);
+	return !hasPasskey;
+}
+
 function base64UrlDecodeString(value: string): string {
 	const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
 	const padding = "=".repeat((4 - (base64.length % 4)) % 4);
@@ -237,15 +247,20 @@ async function tryCreateOAuthUser(
 	if (existing.rows.length > 0) {
 		const existingUser = existing.rows[0];
 
-		// Can't claim if already has OAuth, a passkey, or a different email.
-		if (existingUser.oauth_provider) return null;
-		if (!existingEmailMatchesOAuthEmail(existingUser.email, email)) return null;
 		const passkeys = await c
 			.get("db")
 			.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [
 				existingUser.id,
 			]);
-		if (passkeys.rows.length > 0) return null;
+		if (
+			!canClaimExistingUserWithOAuth(
+				existingUser,
+				email,
+				passkeys.rows.length > 0,
+			)
+		) {
+			return null;
+		}
 
 		// Claim the existing user by linking OAuth credentials
 		await c.get("db").query(
@@ -679,23 +694,18 @@ export function registerOAuthRoutes(app: App) {
 		if (existing.rows.length > 0) {
 			const existingUser = existing.rows[0];
 
-			// If user already has OAuth linked, they can't claim it
-			if (existingUser.oauth_provider) {
-				return c.json({ error: "Username already taken" }, 400);
-			}
-
-			// If user already has a different email linked, they can't claim it via OAuth
-			if (!existingEmailMatchesOAuthEmail(existingUser.email, email)) {
-				return c.json({ error: "Username already taken" }, 400);
-			}
-
-			// If user has a passkey, they've already claimed their account
 			const passkeys = await c
 				.get("db")
 				.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [
 					existingUser.id,
 				]);
-			if (passkeys.rows.length > 0) {
+			if (
+				!canClaimExistingUserWithOAuth(
+					existingUser,
+					email,
+					passkeys.rows.length > 0,
+				)
+			) {
 				return c.json({ error: "Username already taken" }, 400);
 			}
 
