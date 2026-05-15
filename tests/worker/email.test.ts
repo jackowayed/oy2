@@ -26,6 +26,44 @@ describe("email auth", () => {
 		assert.equal(data.code?.length, 6);
 	});
 
+	it("resends the active verification code for an email", async (t) => {
+		const { env, kv } = createTestEnv();
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async () =>
+			({ ok: true, json: async () => ({}) }) as Response;
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const email = "resend@example.com";
+		const first = await jsonRequest(env, "/api/auth/email/send-code", {
+			method: "POST",
+			body: { email },
+		});
+		assert.equal(first.res.status, 200);
+		const firstStored = JSON.parse(
+			(await kv.get(`email_code:${email}`)) ?? "{}",
+		) as { code: string };
+
+		const second = await jsonRequest(env, "/api/auth/email/send-code", {
+			method: "POST",
+			body: { email },
+		});
+		assert.equal(second.res.status, 200);
+		const secondStored = JSON.parse(
+			(await kv.get(`email_code:${email}`)) ?? "{}",
+		) as { code: string };
+
+		assert.equal(secondStored.code, firstStored.code);
+
+		const { res, json } = await jsonRequest(env, "/api/auth/email/verify", {
+			method: "POST",
+			body: { email, code: firstStored.code },
+		});
+		assert.equal(res.status, 200);
+		assert.equal(json.status, "choose_username");
+	});
+
 	it("skips code delivery for hardcoded demo emails", async (t) => {
 		const { env, kv } = createTestEnv();
 		const originalFetch = globalThis.fetch;

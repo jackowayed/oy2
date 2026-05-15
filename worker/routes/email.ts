@@ -164,18 +164,27 @@ export function registerEmailRoutes(app: App) {
 			{ expirationTtl: 60 },
 		);
 
-		// Generate and store new code
-		const code = generateVerificationCode();
+		// Reuse an unexpired code so duplicate emails do not contain conflicting codes.
+		const codeKey = `${EMAIL_CODE_PREFIX}${email}`;
+		const existingCodeRaw = await c.env.OY2.get(codeKey);
+		const existingCode = existingCodeRaw
+			? (JSON.parse(existingCodeRaw) as EmailCodeData)
+			: null;
+		const reusableCode =
+			existingCode && existingCode.attempts < 5 ? existingCode : null;
+		const code = reusableCode?.code ?? generateVerificationCode();
 		await c.env.OY2.put(
-			`${EMAIL_CODE_PREFIX}${email}`,
-			JSON.stringify({ code, attempts: 0 }),
+			codeKey,
+			JSON.stringify({ code, attempts: reusableCode?.attempts ?? 0 }),
 			{ expirationTtl: 600 },
 		);
 
 		const result = await sendEmailCode(c, { email, code });
 		if (!result.success) {
-			// Clean up the stored code if email failed
-			await c.env.OY2.delete(`${EMAIL_CODE_PREFIX}${email}`);
+			// Clean up newly generated codes if email delivery failed.
+			if (!reusableCode) {
+				await c.env.OY2.delete(codeKey);
+			}
 			return c.json({ error: result.error || "Failed to send email" }, 500);
 		}
 
@@ -471,16 +480,27 @@ export function registerEmailRoutes(app: App) {
 			{ expirationTtl: 60 },
 		);
 
-		const code = generateVerificationCode();
+		const addCodeKey = `${EMAIL_ADD_PREFIX}${user.id}`;
+		const existingAddCodeRaw = await c.env.OY2.get(addCodeKey);
+		const existingAddCode = existingAddCodeRaw
+			? (JSON.parse(existingAddCodeRaw) as EmailAddData)
+			: null;
+		const reusableAddCode =
+			existingAddCode?.email === email && existingAddCode.attempts < 5
+				? existingAddCode
+				: null;
+		const code = reusableAddCode?.code ?? generateVerificationCode();
 		await c.env.OY2.put(
-			`${EMAIL_ADD_PREFIX}${user.id}`,
-			JSON.stringify({ email, code, attempts: 0 }),
+			addCodeKey,
+			JSON.stringify({ email, code, attempts: reusableAddCode?.attempts ?? 0 }),
 			{ expirationTtl: 600 },
 		);
 
 		const result = await sendEmailCode(c, { email, code });
 		if (!result.success) {
-			await c.env.OY2.delete(`${EMAIL_ADD_PREFIX}${user.id}`);
+			if (!reusableAddCode) {
+				await c.env.OY2.delete(addCodeKey);
+			}
 			return c.json({ error: result.error || "Failed to send email" }, 500);
 		}
 

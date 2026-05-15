@@ -302,6 +302,7 @@ export function registerPasskeyRoutes(app: App) {
 
 		return c.json({
 			user: authUserPayload(user),
+			sessionToken,
 		});
 	});
 

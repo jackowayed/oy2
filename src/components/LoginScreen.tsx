@@ -391,8 +391,13 @@ export function LoginScreen(props: LoginScreenProps) {
 				throw new Error(data.error || "Passkey login failed");
 			}
 
+			const { user, sessionToken } = (await verifyResponse.json()) as {
+				user: User;
+				sessionToken: string;
+			};
+			setNativeSessionToken(sessionToken);
 			logPasskeyEvent("login", "verify.success");
-			window.location.href = "/";
+			await props.onAuthenticated(user, false);
 		} catch (err) {
 			logPasskeyError("login", startedAt, err);
 			if ((err as Error).name === "NotAllowedError") {

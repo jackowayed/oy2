@@ -27,15 +27,63 @@ export function VerifyCodeScreen(props: VerifyCodeScreenProps) {
 		inputRef?.focus();
 	});
 
+	const setInputSelectionToEnd = (input: HTMLInputElement) => {
+		const end = input.value.length;
+		input.setSelectionRange(end, end);
+	};
+
 	const handleInput: JSX.EventHandler<HTMLInputElement, InputEvent> = (
 		event,
 	) => {
 		const nextValue = event.currentTarget.value.replace(/\D/g, "").slice(0, 6);
 		event.currentTarget.value = nextValue;
 		props.onValueChange(nextValue);
+		setInputSelectionToEnd(event.currentTarget);
 		if (nextValue.length === 6) {
 			formRef?.requestSubmit();
 		}
+	};
+
+	const handleKeyDown: JSX.EventHandler<HTMLInputElement, KeyboardEvent> = (
+		event,
+	) => {
+		if (event.key !== "Backspace" && event.key !== "Delete") {
+			return;
+		}
+
+		event.preventDefault();
+		const input = event.currentTarget;
+		const value = props.value;
+		const selectionStart = input.selectionStart ?? value.length;
+		const selectionEnd = input.selectionEnd ?? selectionStart;
+		const hasSelection = selectionEnd > selectionStart;
+		let nextValue = value;
+		let nextSelection = selectionStart;
+
+		if (hasSelection) {
+			nextValue = value.slice(0, selectionStart) + value.slice(selectionEnd);
+		} else if (event.key === "Backspace") {
+			const removeIndex =
+				selectionStart > 0 ? selectionStart - 1 : value.length - 1;
+			if (removeIndex >= 0) {
+				nextValue = value.slice(0, removeIndex) + value.slice(removeIndex + 1);
+				nextSelection = removeIndex;
+			}
+		} else {
+			const removeIndex =
+				selectionStart < value.length ? selectionStart : value.length - 1;
+			if (removeIndex >= 0) {
+				nextValue = value.slice(0, removeIndex) + value.slice(removeIndex + 1);
+				nextSelection = removeIndex;
+			}
+		}
+
+		input.value = nextValue;
+		props.onValueChange(nextValue);
+		queueMicrotask(() => {
+			const clampedSelection = Math.min(nextSelection, nextValue.length);
+			input.setSelectionRange(clampedSelection, clampedSelection);
+		});
 	};
 
 	const activeIndex = () => Math.min(props.value.length, 5);
@@ -59,11 +107,15 @@ export function VerifyCodeScreen(props: VerifyCodeScreenProps) {
 						ref={inputRef}
 						autocomplete="one-time-code"
 						inputmode="numeric"
+						maxlength={6}
 						autofocus
 						required
 						class="otp-input"
 						value={props.value}
+						onFocus={(event) => setInputSelectionToEnd(event.currentTarget)}
+						onClick={(event) => setInputSelectionToEnd(event.currentTarget)}
 						onInput={handleInput}
+						onKeyDown={handleKeyDown}
 						aria-label="Verification code"
 						disabled={props.loading}
 					/>

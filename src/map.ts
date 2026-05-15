@@ -125,7 +125,7 @@ function addHistoryMarkers(map: L.Map, history: LoHistoryPoint[]) {
 
 	for (const point of history) {
 		// Cubic curve compresses old points toward purple, spreading recent ones across the color range.
-		const t = Math.pow(point.intensity, 3);
+		const t = point.intensity ** 3;
 		const color = interpolateColor(primary, accent, t);
 		L.circleMarker([point.lat, point.lon], {
 			radius: lerp(3, 7, t),
