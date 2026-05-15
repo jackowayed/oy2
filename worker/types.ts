@@ -23,6 +23,7 @@ export type Bindings = {
 	APPLE_KEY_ID: string;
 	APPLE_PRIVATE_KEY: string;
 	GOOGLE_CLIENT_ID: string;
+	GOOGLE_IOS_CLIENT_ID?: string;
 	GOOGLE_CLIENT_SECRET: string;
 	GOOGLE_MAPS_API_KEY: string;
 	// Native push delivery

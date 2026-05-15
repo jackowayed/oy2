@@ -166,6 +166,47 @@ describe("oauth", () => {
 		assert.equal(db.sessions[0].user_id, user.id);
 	});
 
+	it("authenticates native google sign-in with an iOS client audience", async (t) => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, {
+			username: "googleiosuser",
+			oauthProvider: "google",
+			oauthSub: "google-ios-sub-123",
+		});
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url.startsWith("https://oauth2.googleapis.com/tokeninfo")) {
+				return {
+					ok: true,
+					json: async () => ({
+						aud: env.GOOGLE_IOS_CLIENT_ID,
+						sub: "google-ios-sub-123",
+						email: "google-ios@example.com",
+					}),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const res = await request(env, "/api/auth/oauth/google/native", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ idToken: "ios-id-token" }),
+		});
+
+		assert.equal(res.status, 200);
+		const body = (await res.json()) as { needsPasskeySetup: boolean };
+		assert.equal(body.needsPasskeySetup, true);
+		assert.ok(getSessionToken(res));
+		assert.equal(db.sessions.length, 1);
+		assert.equal(db.sessions[0].user_id, user.id);
+	});
+
 	it("rejects native apple sign-in when token audience is web client id", async (t) => {
 		const { env, db } = createTestEnv();
 		seedUser(db, {

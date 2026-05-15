@@ -2061,6 +2061,7 @@ export function createTestEnv() {
 		APPLE_KEY_ID: "apple-key",
 		APPLE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nAAA=\n-----END PRIVATE KEY-----",
 		GOOGLE_CLIENT_ID: "google-client",
+		GOOGLE_IOS_CLIENT_ID: "google-ios-client",
 		GOOGLE_CLIENT_SECRET: "google-secret",
 		RESEND_API_KEY: "resend-key",
 		JWT_SECRET: "test-jwt-secret",

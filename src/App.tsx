@@ -36,6 +36,7 @@ import type {
 } from "./types";
 import {
 	apiFetch,
+	getNativeSessionToken,
 	getUseImperial,
 	onAppVisible,
 	setUseImperial as persistUseImperial,
@@ -811,6 +812,14 @@ export default function App(props: AppProps) {
 		await loadData();
 	}
 
+	async function handleNativeAuthComplete(
+		user: User,
+		needsPasskeySetup: boolean,
+	) {
+		await applyAuthSession(user);
+		setAuthStep(needsPasskeySetup ? "passkey_setup" : "login");
+	}
+
 	// Handle OAuth username selection completion
 	async function handleUsernameComplete(
 		user: User,
@@ -986,14 +995,34 @@ export default function App(props: AppProps) {
 	}
 
 	async function restoreSession() {
-		if (!currentUser()) {
+		let user = currentUser();
+		if (!user && Capacitor.isNativePlatform() && getNativeSessionToken()) {
+			try {
+				const response = await apiFetch("/api/auth/session", {
+					credentials: "include",
+				});
+				if (!response.ok) {
+					clearSessionState();
+					return;
+				}
+
+				const data = (await response.json()) as { user: User };
+				user = data.user;
+				setCurrentUser(user);
+			} catch (_err) {
+				clearSessionState();
+				return;
+			}
+		}
+
+		if (!user) {
 			if (authStep() === "initial") {
 				setAuthStep("login");
 			}
 			return;
 		}
 		try {
-			localStorage.setItem(cachedUserStorageKey, JSON.stringify(currentUser()));
+			localStorage.setItem(cachedUserStorageKey, JSON.stringify(user));
 			await loadData();
 		} catch (_err) {
 			clearSessionState();
@@ -1720,6 +1749,8 @@ export default function App(props: AppProps) {
 											}
 											await tryPasskeyAuth();
 										}}
+										onAuthenticated={handleNativeAuthComplete}
+										onChooseUsername={() => setAuthStep("choose_username")}
 										onEmailLogin={() => setAuthStep("email_login")}
 										onEmailSignup={(username: string) => {
 											setSignupUsername(username);

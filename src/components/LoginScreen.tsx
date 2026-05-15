@@ -9,6 +9,7 @@ import {
 	logPasskeyEvent,
 	logPasskeyStart,
 } from "../passkeyDebug";
+import type { User } from "../types";
 import { apiFetch, setNativeSessionToken, setOauthPendingId } from "../utils";
 import { Screen } from "./Screen";
 import "./ButtonStyles.css";
@@ -18,9 +19,22 @@ import "./EmailLoginScreen.css";
 
 type LoginScreenProps = {
 	onTryPasskey: () => Promise<void>;
+	onAuthenticated: (user: User, needsPasskeySetup: boolean) => Promise<void>;
+	onChooseUsername: () => void;
 	onEmailLogin: () => void;
 	onEmailSignup: (username: string) => void;
 };
+
+type NativeOAuthAuthenticated = {
+	user: User;
+	needsPasskeySetup: boolean;
+	sessionToken: string;
+};
+
+type NativeOAuthResponse =
+	| NativeOAuthAuthenticated
+	| { needsUsername: true; pendingId?: string }
+	| { error: string };
 
 export function LoginScreen(props: LoginScreenProps) {
 	const [mode, setMode] = createSignal<"home" | "pick_method">("home");
@@ -133,10 +147,7 @@ export function LoginScreen(props: LoginScreenProps) {
 				body: JSON.stringify(body),
 			});
 
-			const data = (await response.json()) as
-				| { user: unknown; needsPasskeySetup?: boolean; sessionToken?: string }
-				| { needsUsername: true; pendingId?: string }
-				| { error: string };
+			const data = (await response.json()) as NativeOAuthResponse;
 
 			if (!response.ok) {
 				setGoogleError((data as { error: string }).error || "Login failed");
@@ -147,20 +158,16 @@ export function LoginScreen(props: LoginScreenProps) {
 				if (data.pendingId) {
 					setOauthPendingId(data.pendingId);
 				}
-				window.location.href = "/?choose_username=1";
+				props.onChooseUsername();
 				return;
 			}
 
-			if ("sessionToken" in data && data.sessionToken) {
-				setNativeSessionToken(data.sessionToken);
-			}
-
-			if ("needsPasskeySetup" in data && data.needsPasskeySetup) {
-				window.location.href = "/?passkey_setup=1";
-				return;
-			}
-
-			window.location.href = "/";
+			const authenticated = data as NativeOAuthAuthenticated;
+			setNativeSessionToken(authenticated.sessionToken);
+			await props.onAuthenticated(
+				authenticated.user,
+				authenticated.needsPasskeySetup,
+			);
 		} catch (err) {
 			const msg = (err as Error).message || "";
 			if (msg.includes("cancel") || msg.includes("Cancel")) {
@@ -210,10 +217,7 @@ export function LoginScreen(props: LoginScreenProps) {
 				body: JSON.stringify(body),
 			});
 
-			const data = (await response.json()) as
-				| { user: unknown; needsPasskeySetup?: boolean; sessionToken?: string }
-				| { needsUsername: true; pendingId?: string }
-				| { error: string };
+			const data = (await response.json()) as NativeOAuthResponse;
 
 			if (!response.ok) {
 				setAppleError((data as { error: string }).error || "Login failed");
@@ -224,20 +228,16 @@ export function LoginScreen(props: LoginScreenProps) {
 				if (data.pendingId) {
 					setOauthPendingId(data.pendingId);
 				}
-				window.location.href = "/?choose_username=1";
+				props.onChooseUsername();
 				return;
 			}
 
-			if ("sessionToken" in data && data.sessionToken) {
-				setNativeSessionToken(data.sessionToken);
-			}
-
-			if ("needsPasskeySetup" in data && data.needsPasskeySetup) {
-				window.location.href = "/?passkey_setup=1";
-				return;
-			}
-
-			window.location.href = "/";
+			const authenticated = data as NativeOAuthAuthenticated;
+			setNativeSessionToken(authenticated.sessionToken);
+			await props.onAuthenticated(
+				authenticated.user,
+				authenticated.needsPasskeySetup,
+			);
 		} catch (err) {
 			const msg = (err as Error).message || "";
 			if (msg.includes("cancel") || msg.includes("Cancel")) {

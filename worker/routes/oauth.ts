@@ -170,7 +170,7 @@ async function verifyAppleIdToken(
 // Verify Google ID token
 async function verifyGoogleIdToken(
 	idToken: string,
-	clientId: string,
+	expectedAudiences: string[],
 ): Promise<{ sub: string; email?: string; name?: string } | null> {
 	try {
 		// Use Google's tokeninfo endpoint for simplicity
@@ -192,10 +192,10 @@ async function verifyGoogleIdToken(
 		};
 
 		// Verify audience
-		if (payload.aud !== clientId) {
+		if (!expectedAudiences.includes(payload.aud)) {
 			console.warn("[oauth][google] audience mismatch", {
 				tokenAud: payload.aud,
-				expectedClientId: clientId,
+				expectedAudiences,
 				sub: payload.sub,
 			});
 			return null;
@@ -264,6 +264,11 @@ export function registerOAuthRoutes(app: App) {
 	const webAppleClientId = (c: AppContext) => c.env.APPLE_CLIENT_ID;
 	const nativeAppleClientId = (c: AppContext) =>
 		c.env.APPLE_NATIVE_CLIENT_ID || c.env.APPLE_CLIENT_ID;
+	const googleWebClientIds = (c: AppContext) => [c.env.GOOGLE_CLIENT_ID];
+	const googleNativeClientIds = (c: AppContext) => [
+		c.env.GOOGLE_CLIENT_ID,
+		...(c.env.GOOGLE_IOS_CLIENT_ID ? [c.env.GOOGLE_IOS_CLIENT_ID] : []),
+	];
 
 	// Apple Sign-In redirect
 	app.get("/api/auth/oauth/apple", async (c: AppContext) => {
@@ -411,7 +416,7 @@ export function registerOAuthRoutes(app: App) {
 
 			const verified = await verifyGoogleIdToken(
 				tokens.id_token,
-				c.env.GOOGLE_CLIENT_ID,
+				googleWebClientIds(c),
 			);
 			if (!verified) {
 				return c.redirect("/?error=invalid_token");
@@ -547,7 +552,7 @@ export function registerOAuthRoutes(app: App) {
 
 		const verified = await verifyGoogleIdToken(
 			tokens.id_token,
-			c.env.GOOGLE_CLIENT_ID,
+			googleWebClientIds(c),
 		);
 		if (!verified) {
 			return c.redirect("/?error=invalid_token");
@@ -876,7 +881,10 @@ export function registerOAuthRoutes(app: App) {
 			return c.json({ error: "Missing idToken" }, 400);
 		}
 
-		const verified = await verifyGoogleIdToken(idToken, c.env.GOOGLE_CLIENT_ID);
+		const verified = await verifyGoogleIdToken(
+			idToken,
+			googleNativeClientIds(c),
+		);
 		if (!verified) {
 			return c.json({ error: "Invalid ID token" }, 401);
 		}

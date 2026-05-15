@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { signAuthJwt } from "../../worker/lib";
-import { getCookieValue, getSessionToken, jsonRequest } from "./testHelpers";
+import {
+	getCookieValue,
+	getSessionToken,
+	jsonRequest,
+	request,
+} from "./testHelpers";
 import { createTestEnv, seedSession, seedUser } from "./testUtils";
 
 describe("auth", () => {
@@ -22,6 +27,28 @@ describe("auth", () => {
 		const body = json as { user: { username: string } };
 		assert.equal(res.status, 200);
 		assert.equal(body.user.username, "Zed");
+	});
+
+	it("allows native app CORS preflight headers", async () => {
+		const { env } = createTestEnv();
+		const res = await request(env, "/api/auth/session", {
+			method: "OPTIONS",
+			headers: {
+				origin: "https://oyme.site",
+				"access-control-request-method": "GET",
+				"access-control-request-headers":
+					"authorization,x-oauth-pending,x-email-pending,content-type",
+			},
+		});
+
+		assert.equal(res.status, 204);
+		assert.equal(res.headers.get("access-control-allow-origin"), "https://oyme.site");
+		const allowHeaders =
+			res.headers.get("access-control-allow-headers")?.toLowerCase() ?? "";
+		assert.ok(allowHeaders.includes("authorization"));
+		assert.ok(allowHeaders.includes("x-oauth-pending"));
+		assert.ok(allowHeaders.includes("x-email-pending"));
+		assert.ok(allowHeaders.includes("content-type"));
 	});
 
 	it("accepts a valid JWT without a session table lookup", async () => {

@@ -31,11 +31,18 @@ app.use(
 	cors({
 		origin: [
 			"https://oyme.site",
+			"https://dev.oyme.site",
 			"capacitor://oyme.site",
 			"http://localhost",
 			"http://127.0.0.1",
 		],
-		allowHeaders: ["Content-Type", "X-Session-Token"],
+		allowHeaders: [
+			"Authorization",
+			"Content-Type",
+			"X-Email-Pending",
+			"X-OAuth-Pending",
+			"X-Session-Token",
+		],
 		allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 		credentials: true,
 	}),
