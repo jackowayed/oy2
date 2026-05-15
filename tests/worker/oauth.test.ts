@@ -84,6 +84,7 @@ describe("oauth", () => {
 						aud: env.GOOGLE_CLIENT_ID,
 						sub: "sub-123",
 						email: "oauth@example.com",
+						email_verified: "true",
 					}),
 				} as Response;
 			}
@@ -184,6 +185,7 @@ describe("oauth", () => {
 						aud: env.GOOGLE_IOS_CLIENT_ID,
 						sub: "google-ios-sub-123",
 						email: "google-ios@example.com",
+						email_verified: "true",
 					}),
 				} as Response;
 			}
@@ -320,6 +322,59 @@ describe("oauth", () => {
 		assert.match(String(pending), /"name":"Native Apple User"/);
 	});
 
+	it("links matching-email google callback users without asking for username", async (t) => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, {
+			username: "GoogleEmailUser",
+			email: "google-email@example.com",
+		});
+		seedPasskey(db, { userId: user.id });
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url === "https://oauth2.googleapis.com/token") {
+				return {
+					ok: true,
+					json: async () => ({ id_token: "token-email-link" }),
+				} as Response;
+			}
+			if (url.startsWith("https://oauth2.googleapis.com/tokeninfo")) {
+				return {
+					ok: true,
+					json: async () => ({
+						aud: env.GOOGLE_CLIENT_ID,
+						sub: "google-email-sub",
+						email: "Google-Email@Example.com",
+						email_verified: "true",
+					}),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const startRes = await request(env, "/api/auth/oauth/google");
+		const startLocation = startRes.headers.get("location") ?? "";
+		const state = new URL(startLocation).searchParams.get("state") ?? "";
+
+		const res = await request(
+			env,
+			`/api/auth/oauth/callback?state=${state}&code=auth-code`,
+		);
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/");
+		assert.ok(getSessionToken(res));
+		assert.equal(db.sessions.length, 1);
+		assert.equal(db.sessions[0].user_id, user.id);
+		assert.equal(user.oauth_provider, "google");
+		assert.equal(user.oauth_sub, "google-email-sub");
+		assert.equal(await kv.get(`oauth_state:${state}`), null);
+	});
+
 	it("claims placeholder users during oauth completion", async () => {
 		const { env, kv, db } = createTestEnv();
 		const user = seedUser(db, { username: "Placeholder" });
@@ -342,8 +397,12 @@ describe("oauth", () => {
 		});
 
 		assert.equal(res.status, 200);
-		const body = (await res.json()) as { claimed: boolean };
+		const body = (await res.json()) as {
+			claimed: boolean;
+			needsPasskeySetup: boolean;
+		};
 		assert.equal(body.claimed, true);
+		assert.equal(body.needsPasskeySetup, true);
 		assert.equal(user.oauth_provider, "google");
 		assert.equal(user.oauth_sub, "google-sub-claim");
 		assert.equal(user.email, "claim@example.com");
@@ -376,8 +435,12 @@ describe("oauth", () => {
 		});
 
 		assert.equal(res.status, 200);
-		const body = (await res.json()) as { claimed: boolean };
+		const body = (await res.json()) as {
+			claimed: boolean;
+			needsPasskeySetup: boolean;
+		};
 		assert.equal(body.claimed, true);
+		assert.equal(body.needsPasskeySetup, true);
 		assert.equal(user.oauth_provider, "google");
 		assert.equal(user.oauth_sub, "google-sub-email-linked");
 		assert.equal(user.email, "Existing@Example.com");
@@ -444,8 +507,12 @@ describe("oauth", () => {
 		});
 
 		assert.equal(res.status, 200);
-		const body = (await res.json()) as { claimed: boolean };
+		const body = (await res.json()) as {
+			claimed: boolean;
+			needsPasskeySetup: boolean;
+		};
 		assert.equal(body.claimed, true);
+		assert.equal(body.needsPasskeySetup, false);
 		assert.equal(user.oauth_provider, "google");
 		assert.equal(user.oauth_sub, "google-sub-passkey-email");
 		assert.equal(user.email, "passkey@example.com");

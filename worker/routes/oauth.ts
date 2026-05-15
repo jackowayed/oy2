@@ -58,6 +58,38 @@ function canClaimExistingUserWithOAuth(
 	return !hasPasskey;
 }
 
+type OAuthUserResult = {
+	user: User;
+	hasPasskey: boolean;
+	claimed: boolean;
+};
+
+async function userHasPasskey(c: AppContext, userId: number) {
+	const passkeys = await c
+		.get("db")
+		.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [userId]);
+	return passkeys.rows.length > 0;
+}
+
+async function linkOAuthToUser(
+	c: AppContext,
+	user: User,
+	provider: string,
+	sub: string,
+	email: string | undefined,
+) {
+	await c.get("db").query(
+		`UPDATE users SET oauth_provider = $1, oauth_sub = $2, email = COALESCE(email, $3)
+		 WHERE id = $4`,
+		[provider, sub, email || null, user.id],
+	);
+	user.oauth_provider = provider;
+	user.oauth_sub = sub;
+	if (!user.email && email) {
+		user.email = email;
+	}
+}
+
 function base64UrlDecodeString(value: string): string {
 	const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
 	const padding = "=".repeat((4 - (base64.length % 4)) % 4);
@@ -208,6 +240,7 @@ async function verifyGoogleIdToken(
 			aud: string;
 			sub: string;
 			email?: string;
+			email_verified?: boolean | string;
 			name?: string;
 		};
 
@@ -221,7 +254,13 @@ async function verifyGoogleIdToken(
 			return null;
 		}
 
-		return { sub: payload.sub, email: payload.email, name: payload.name };
+		const emailVerified =
+			payload.email_verified === true || payload.email_verified === "true";
+		return {
+			sub: payload.sub,
+			email: emailVerified ? payload.email : undefined,
+			name: payload.name,
+		};
 	} catch {
 		return null;
 	}
@@ -235,7 +274,7 @@ async function tryCreateOAuthUser(
 	provider: string,
 	sub: string,
 	email: string | undefined,
-): Promise<User | null> {
+): Promise<OAuthUserResult | null> {
 	const trimmed = username.trim().toLowerCase();
 	if (!trimmed) return null;
 	if (validateCleanUsername(trimmed)) return null;
@@ -247,33 +286,13 @@ async function tryCreateOAuthUser(
 	if (existing.rows.length > 0) {
 		const existingUser = existing.rows[0];
 
-		const passkeys = await c
-			.get("db")
-			.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [
-				existingUser.id,
-			]);
-		if (
-			!canClaimExistingUserWithOAuth(
-				existingUser,
-				email,
-				passkeys.rows.length > 0,
-			)
-		) {
+		const hasPasskey = await userHasPasskey(c, existingUser.id);
+		if (!canClaimExistingUserWithOAuth(existingUser, email, hasPasskey)) {
 			return null;
 		}
 
-		// Claim the existing user by linking OAuth credentials
-		await c.get("db").query(
-			`UPDATE users SET oauth_provider = $1, oauth_sub = $2, email = COALESCE(email, $3)
-			 WHERE id = $4`,
-			[provider, sub, email || null, existingUser.id],
-		);
-		existingUser.oauth_provider = provider;
-		existingUser.oauth_sub = sub;
-		if (!existingUser.email && email) {
-			existingUser.email = email;
-		}
-		return existingUser;
+		await linkOAuthToUser(c, existingUser, provider, sub, email);
+		return { user: existingUser, hasPasskey, claimed: true };
 	}
 
 	// Create new user
@@ -283,7 +302,30 @@ async function tryCreateOAuthUser(
 		 RETURNING *`,
 		[trimmed, provider, sub, email || null],
 	);
-	return result.rows[0];
+	return { user: result.rows[0], hasPasskey: false, claimed: false };
+}
+
+async function tryLinkOAuthUserByEmail(
+	c: AppContext,
+	provider: string,
+	sub: string,
+	email: string | undefined,
+): Promise<OAuthUserResult | null> {
+	if (!email) return null;
+
+	const candidates = await c
+		.get("db")
+		.query<User>("SELECT * FROM users WHERE LOWER(email) = $1", [
+			email.toLowerCase(),
+		]);
+	if (candidates.rows.length !== 1) return null;
+
+	const user = candidates.rows[0];
+	const hasPasskey = await userHasPasskey(c, user.id);
+	if (!canClaimExistingUserWithOAuth(user, email, hasPasskey)) return null;
+
+	await linkOAuthToUser(c, user, provider, sub, email);
+	return { user, hasPasskey, claimed: true };
 }
 
 export function registerOAuthRoutes(app: App) {
@@ -470,32 +512,40 @@ export function registerOAuthRoutes(app: App) {
 			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
-			// Check if they have a passkey
-			const passkeys = await c
-				.get("db")
-				.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [user.id]);
-
-			if (passkeys.rows.length === 0) {
+			if (!(await userHasPasskey(c, user.id))) {
 				return c.redirect("/?passkey_setup=1");
 			}
 
 			return c.redirect("/");
 		}
 
+		const emailLinkedUser = await tryLinkOAuthUserByEmail(
+			c,
+			provider,
+			oauthSub,
+			email,
+		);
+		if (emailLinkedUser) {
+			const sessionToken = await createSession(c, emailLinkedUser.user);
+			setAuthCookies(c, sessionToken, emailLinkedUser.user);
+			updateLastSeen(c, emailLinkedUser.user.id);
+			return c.redirect(emailLinkedUser.hasPasskey ? "/" : "/?passkey_setup=1");
+		}
+
 		// New user - if we have a pre-selected username from sign-up, try to create directly
 		if (signupUsername) {
-			const user = await tryCreateOAuthUser(
+			const result = await tryCreateOAuthUser(
 				c,
 				signupUsername,
 				provider,
 				oauthSub,
 				email,
 			);
-			if (user) {
-				const sessionToken = await createSession(c, user);
-				setAuthCookies(c, sessionToken, user);
-				updateLastSeen(c, user.id);
-				return c.redirect("/?passkey_setup=1");
+			if (result) {
+				const sessionToken = await createSession(c, result.user);
+				setAuthCookies(c, sessionToken, result.user);
+				updateLastSeen(c, result.user.id);
+				return c.redirect(result.hasPasskey ? "/" : "/?passkey_setup=1");
 			}
 			// Username was taken (race condition) - fall through to choose_username
 		}
@@ -598,31 +648,40 @@ export function registerOAuthRoutes(app: App) {
 			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
-			const passkeys = await c
-				.get("db")
-				.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [user.id]);
-
-			if (passkeys.rows.length === 0) {
+			if (!(await userHasPasskey(c, user.id))) {
 				return c.redirect("/?passkey_setup=1");
 			}
 
 			return c.redirect("/");
 		}
 
+		const emailLinkedUser = await tryLinkOAuthUserByEmail(
+			c,
+			"google",
+			verified.sub,
+			verified.email,
+		);
+		if (emailLinkedUser) {
+			const sessionToken = await createSession(c, emailLinkedUser.user);
+			setAuthCookies(c, sessionToken, emailLinkedUser.user);
+			updateLastSeen(c, emailLinkedUser.user.id);
+			return c.redirect(emailLinkedUser.hasPasskey ? "/" : "/?passkey_setup=1");
+		}
+
 		// New user - if we have a pre-selected username from sign-up, try to create directly
 		if (signupUsername) {
-			const user = await tryCreateOAuthUser(
+			const result = await tryCreateOAuthUser(
 				c,
 				signupUsername,
 				"google",
 				verified.sub,
 				verified.email,
 			);
-			if (user) {
-				const sessionToken = await createSession(c, user);
-				setAuthCookies(c, sessionToken, user);
-				updateLastSeen(c, user.id);
-				return c.redirect("/?passkey_setup=1");
+			if (result) {
+				const sessionToken = await createSession(c, result.user);
+				setAuthCookies(c, sessionToken, result.user);
+				updateLastSeen(c, result.user.id);
+				return c.redirect(result.hasPasskey ? "/" : "/?passkey_setup=1");
 			}
 			// Username was taken (race condition) - fall through to choose_username
 		}
@@ -684,82 +743,30 @@ export function registerOAuthRoutes(app: App) {
 			return c.json({ error: moderationError }, 400);
 		}
 
-		// Check if username exists
-		const existing = await c
-			.get("db")
-			.query<User>("SELECT * FROM users WHERE LOWER(username) = $1", [
-				trimmedUsername,
-			]);
-
-		if (existing.rows.length > 0) {
-			const existingUser = existing.rows[0];
-
-			const passkeys = await c
-				.get("db")
-				.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [
-					existingUser.id,
-				]);
-			if (
-				!canClaimExistingUserWithOAuth(
-					existingUser,
-					email,
-					passkeys.rows.length > 0,
-				)
-			) {
-				return c.json({ error: "Username already taken" }, 400);
-			}
-
-			// Claim the existing user by linking OAuth credentials
-			await c.get("db").query(
-				`UPDATE users SET oauth_provider = $1, oauth_sub = $2, email = COALESCE(email, $3)
-				 WHERE id = $4`,
-				[provider, sub, email || null, existingUser.id],
-			);
-			existingUser.oauth_provider = provider;
-			existingUser.oauth_sub = sub;
-			if (!existingUser.email && email) {
-				existingUser.email = email;
-			}
-
-			// Clean up pending data
-			await c.env.OY2.delete(`${OAUTH_PENDING_PREFIX}${pendingId}`);
-			deleteCookie(c, "oauth_pending", { path: "/" });
-
-			// Create session for claimed user
-			const sessionToken = await createSession(c, existingUser);
-			setAuthCookies(c, sessionToken, existingUser);
-			updateLastSeen(c, existingUser.id);
-
-			return c.json({
-				user: authUserPayload(existingUser),
-				claimed: true,
-				needsPasskeySetup: true,
-				sessionToken,
-			});
-		}
-
-		// Create new user
-		const result = await c.get("db").query<User>(
-			`INSERT INTO users (username, oauth_provider, oauth_sub, email)
-			 VALUES ($1, $2, $3, $4)
-			 RETURNING *`,
-			[trimmedUsername, provider, sub, email || null],
+		const result = await tryCreateOAuthUser(
+			c,
+			trimmedUsername,
+			provider,
+			sub,
+			email,
 		);
-
-		const user = result.rows[0];
+		if (!result) {
+			return c.json({ error: "Username already taken" }, 400);
+		}
 
 		// Clean up pending data
 		await c.env.OY2.delete(`${OAUTH_PENDING_PREFIX}${pendingId}`);
 		deleteCookie(c, "oauth_pending", { path: "/" });
 
 		// Create session
-		const sessionToken = await createSession(c, user);
-		setAuthCookies(c, sessionToken, user);
-		updateLastSeen(c, user.id);
+		const sessionToken = await createSession(c, result.user);
+		setAuthCookies(c, sessionToken, result.user);
+		updateLastSeen(c, result.user.id);
 
 		return c.json({
-			user: authUserPayload(user),
-			needsPasskeySetup: true,
+			user: authUserPayload(result.user),
+			...(result.claimed ? { claimed: true } : {}),
+			needsPasskeySetup: !result.hasPasskey,
 			sessionToken,
 		});
 	});
@@ -833,13 +840,26 @@ export function registerOAuthRoutes(app: App) {
 			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
-			const passkeys = await c
-				.get("db")
-				.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [user.id]);
-
 			return c.json({
 				user: authUserPayload(user),
-				needsPasskeySetup: passkeys.rows.length === 0,
+				needsPasskeySetup: !(await userHasPasskey(c, user.id)),
+				sessionToken,
+			});
+		}
+
+		const emailLinkedUser = await tryLinkOAuthUserByEmail(
+			c,
+			"apple",
+			verified.sub,
+			verified.email,
+		);
+		if (emailLinkedUser) {
+			const sessionToken = await createSession(c, emailLinkedUser.user);
+			setAuthCookies(c, sessionToken, emailLinkedUser.user);
+			updateLastSeen(c, emailLinkedUser.user.id);
+			return c.json({
+				user: authUserPayload(emailLinkedUser.user),
+				needsPasskeySetup: !emailLinkedUser.hasPasskey,
 				sessionToken,
 			});
 		}
@@ -850,7 +870,7 @@ export function registerOAuthRoutes(app: App) {
 			if (moderationError) {
 				return c.json({ error: moderationError }, 400);
 			}
-			const user = await tryCreateOAuthUser(
+			const result = await tryCreateOAuthUser(
 				c,
 				username,
 				"apple",
@@ -858,13 +878,13 @@ export function registerOAuthRoutes(app: App) {
 				verified.email,
 			);
 
-			if (user) {
-				const sessionToken = await createSession(c, user);
-				setAuthCookies(c, sessionToken, user);
-				updateLastSeen(c, user.id);
+			if (result) {
+				const sessionToken = await createSession(c, result.user);
+				setAuthCookies(c, sessionToken, result.user);
+				updateLastSeen(c, result.user.id);
 				return c.json({
-					user: authUserPayload(user),
-					needsPasskeySetup: true,
+					user: authUserPayload(result.user),
+					needsPasskeySetup: !result.hasPasskey,
 					sessionToken,
 				});
 			}
@@ -929,13 +949,26 @@ export function registerOAuthRoutes(app: App) {
 			setAuthCookies(c, sessionToken, user);
 			updateLastSeen(c, user.id);
 
-			const passkeys = await c
-				.get("db")
-				.query("SELECT id FROM passkeys WHERE user_id = $1 LIMIT 1", [user.id]);
-
 			return c.json({
 				user: authUserPayload(user),
-				needsPasskeySetup: passkeys.rows.length === 0,
+				needsPasskeySetup: !(await userHasPasskey(c, user.id)),
+				sessionToken,
+			});
+		}
+
+		const emailLinkedUser = await tryLinkOAuthUserByEmail(
+			c,
+			"google",
+			verified.sub,
+			verified.email,
+		);
+		if (emailLinkedUser) {
+			const sessionToken = await createSession(c, emailLinkedUser.user);
+			setAuthCookies(c, sessionToken, emailLinkedUser.user);
+			updateLastSeen(c, emailLinkedUser.user.id);
+			return c.json({
+				user: authUserPayload(emailLinkedUser.user),
+				needsPasskeySetup: !emailLinkedUser.hasPasskey,
 				sessionToken,
 			});
 		}
@@ -946,7 +979,7 @@ export function registerOAuthRoutes(app: App) {
 			if (moderationError) {
 				return c.json({ error: moderationError }, 400);
 			}
-			const user = await tryCreateOAuthUser(
+			const result = await tryCreateOAuthUser(
 				c,
 				username,
 				"google",
@@ -954,13 +987,13 @@ export function registerOAuthRoutes(app: App) {
 				verified.email,
 			);
 
-			if (user) {
-				const sessionToken = await createSession(c, user);
-				setAuthCookies(c, sessionToken, user);
-				updateLastSeen(c, user.id);
+			if (result) {
+				const sessionToken = await createSession(c, result.user);
+				setAuthCookies(c, sessionToken, result.user);
+				updateLastSeen(c, result.user.id);
 				return c.json({
-					user: authUserPayload(user),
-					needsPasskeySetup: true,
+					user: authUserPayload(result.user),
+					needsPasskeySetup: !result.hasPasskey,
 					sessionToken,
 				});
 			}

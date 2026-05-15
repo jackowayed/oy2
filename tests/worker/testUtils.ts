@@ -954,11 +954,10 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 		}
 		if (sql.startsWith("SELECT * FROM users WHERE LOWER(email) = ?")) {
 			const [email] = this.params as [string];
-			const user =
-				this.db.users.find(
+			const users = this.db.users.filter(
 					(row) => (row.email ?? "").toLowerCase() === email.toLowerCase(),
-				) ?? null;
-			return { results: user ? [user] : [] };
+			);
+			return { results: users };
 		}
 		if (sql.startsWith("SELECT * FROM users WHERE oauth_provider = ?")) {
 			const [provider, sub] = this.params as [string, string];
