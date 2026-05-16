@@ -850,6 +850,14 @@ export default function App(props: AppProps) {
 		navigate("/settings");
 	}
 
+	// Abort controller for the in-flight conditional mediation request, if any.
+	let passkeyAutofillAbortController: AbortController | null = null;
+
+	function abortPasskeyAutofill() {
+		passkeyAutofillAbortController?.abort();
+		passkeyAutofillAbortController = null;
+	}
+
 	// Try zero-click passkey authentication
 	async function tryPasskeyAuth(): Promise<boolean> {
 		const startedAt = logPasskeyStart("autofill");
@@ -895,6 +903,7 @@ export default function App(props: AppProps) {
 			});
 
 			// Try to get credential with conditional mediation
+			passkeyAutofillAbortController = new AbortController();
 			const credential = (await navigator.credentials.get({
 				publicKey: {
 					challenge: base64UrlDecode(options.challenge).buffer as ArrayBuffer,
@@ -904,7 +913,9 @@ export default function App(props: AppProps) {
 					allowCredentials: [],
 				},
 				mediation: "conditional",
+				signal: passkeyAutofillAbortController.signal,
 			})) as PublicKeyCredential | null;
+			passkeyAutofillAbortController = null;
 
 			if (!credential) {
 				logPasskeyEvent("autofill", "credential.null");
@@ -948,6 +959,9 @@ export default function App(props: AppProps) {
 			}
 			return true;
 		} catch (err) {
+			if (err instanceof DOMException && err.name === "AbortError") {
+				return false;
+			}
 			logPasskeyError("autofill", startedAt, err);
 			return false;
 		}
@@ -1749,6 +1763,7 @@ export default function App(props: AppProps) {
 											}
 											await tryPasskeyAuth();
 										}}
+										onAbortAutofill={abortPasskeyAutofill}
 										onAuthenticated={handleNativeAuthComplete}
 										onChooseUsername={() => setAuthStep("choose_username")}
 										onEmailLogin={() => setAuthStep("email_login")}
