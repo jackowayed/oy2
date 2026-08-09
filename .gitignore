@@ -16,6 +16,7 @@ data/*.db-*
 .wrangler/
 
 # Environment variables
+.dev-env
 .env
 .env.local
 .env.*.local

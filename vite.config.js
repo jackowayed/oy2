@@ -46,7 +46,11 @@ export default defineConfig({
         ],
       },
     }),
-    cloudflare(),
+    // Sandboxes that force all traffic through an egress proxy can't reach
+    // miniflare's inspector on 127.0.0.1; scripts/dev-setup.sh sets this there.
+    cloudflare(
+      process.env.DISABLE_WORKERD_INSPECTOR ? { inspectorPort: false } : {},
+    ),
   ],
   server: {
     port: 5173,
