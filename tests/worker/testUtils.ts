@@ -1190,7 +1190,17 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 		) {
 			const [userId] = this.params as [number];
 			const results = this.db.friendships
-				.filter((row) => row.user_id === userId)
+				.filter(
+					(row) =>
+						row.user_id === userId &&
+						!this.db.userBlocks.some(
+							(block) =>
+								(block.blocker_user_id === row.user_id &&
+									block.blocked_user_id === row.friend_id) ||
+								(block.blocker_user_id === row.friend_id &&
+									block.blocked_user_id === row.user_id),
+						),
+				)
 				.map((row) => {
 					const user = this.db.users.find((u) => u.id === row.friend_id);
 					if (!user) {

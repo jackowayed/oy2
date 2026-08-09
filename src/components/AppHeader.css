@@ -30,6 +30,21 @@
 	margin: 0;
 }
 
+/* The wordmark is a button so the easter egg has a real click target, but it
+   must look and feel exactly like the plain heading it replaced. */
+.app-title-tap {
+	font: inherit;
+	letter-spacing: inherit;
+	color: inherit;
+	-webkit-text-fill-color: inherit;
+	background: none;
+	border: 0;
+	padding: 0;
+	margin: 0;
+	cursor: default;
+	-webkit-tap-highlight-color: transparent;
+}
+
 .app-back-link {
 	color: var(--text);
 	font-family: var(--font-display);

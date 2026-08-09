@@ -1,6 +1,7 @@
 import {
 	computeStreakLength,
 	createOyAndNotification,
+	fetchFriends,
 	getStreakDateBoundaries,
 	sendPushNotifications,
 	updateLastSeen,
@@ -59,7 +60,77 @@ async function reverseGeocodeCity(
 	return null;
 }
 
+const BROADCAST_RATE_PREFIX = "oy_broadcast_rate:";
+const BROADCAST_COOLDOWN_SECONDS = 15 * 60;
+
+type BroadcastRateData = {
+	until: number;
+};
+
 export function registerOyRoutes(app: App) {
+	const deliverOyLike = async (
+		c: AppContext,
+		user: User,
+		{
+			toUserId,
+			type,
+			payload,
+			makeNotificationPayload,
+		}: {
+			toUserId: number;
+			type: "oy" | "lo";
+			payload: string | null;
+			makeNotificationPayload: (oyId: number) => PushPayload;
+		},
+	) => {
+		const { oyId, notificationId, deliveryPayload, subscriptions } =
+			await createOyAndNotification(
+				c,
+				user.id,
+				toUserId,
+				type,
+				payload,
+				makeNotificationPayload,
+			);
+
+		const streakResult = await c.get("db").query<{
+			last_oy_created_at: number | null;
+			streak_start_date: number | null;
+		}>(
+			"SELECT last_oy_created_at, streak_start_date FROM last_oy_info WHERE user_id = $1 AND friend_id = $2 LIMIT 1",
+			[user.id, toUserId],
+		);
+		const streakRow = streakResult.rows[0] ?? null;
+
+		const { startOfTodayNY, startOfYesterdayNY } = getStreakDateBoundaries();
+		const streak = computeStreakLength({
+			lastOyCreatedAt: streakRow?.last_oy_created_at ?? null,
+			streakStartDate: streakRow?.streak_start_date ?? null,
+			startOfTodayNY,
+			startOfYesterdayNY,
+		});
+
+		c.executionCtx.waitUntil(
+			sendPushNotifications(
+				c,
+				subscriptions,
+				deliveryPayload,
+				notificationId,
+				toUserId,
+			),
+		);
+
+		return { oyId, streak };
+	};
+
+	const oyNotificationPayload = (user: User): PushPayload => ({
+		title: "Oy!",
+		body: `${user.username} sent you an Oy!`,
+		icon: "/icon-192.png",
+		badge: "/icon-192.png",
+		type: "oy",
+	});
+
 	const sendOyLike = async (
 		c: AppContext,
 		user: User,
@@ -109,45 +180,12 @@ export function registerOyRoutes(app: App) {
 			);
 		}
 
-		const { oyId, notificationId, deliveryPayload, subscriptions } =
-			await createOyAndNotification(
-				c,
-				user.id,
-				toUserId,
-				type,
-				payload,
-				makeNotificationPayload,
-			);
-
-		const streakResult = await c.get("db").query<{
-			last_oy_created_at: number | null;
-			streak_start_date: number | null;
-		}>(
-			"SELECT last_oy_created_at, streak_start_date FROM last_oy_info WHERE user_id = $1 AND friend_id = $2 LIMIT 1",
-			[user.id, toUserId],
-		);
-		const streakRow = (streakResult.rows[0] ?? null) as {
-			last_oy_created_at: number | null;
-			streak_start_date: number | null;
-		} | null;
-
-		const { startOfTodayNY, startOfYesterdayNY } = getStreakDateBoundaries();
-		const streak = computeStreakLength({
-			lastOyCreatedAt: streakRow?.last_oy_created_at ?? null,
-			streakStartDate: streakRow?.streak_start_date ?? null,
-			startOfTodayNY,
-			startOfYesterdayNY,
+		const { oyId, streak } = await deliverOyLike(c, user, {
+			toUserId,
+			type,
+			payload,
+			makeNotificationPayload,
 		});
-
-		c.executionCtx.waitUntil(
-			sendPushNotifications(
-				c,
-				subscriptions,
-				deliveryPayload,
-				notificationId,
-				toUserId,
-			),
-		);
 
 		updateLastSeen(c, user.id);
 		return c.json({ success: true, yoId: oyId, streak });
@@ -165,20 +203,62 @@ export function registerOyRoutes(app: App) {
 			return c.json({ error: "Missing toUserId" }, 400);
 		}
 
-		const notificationPayload: PushPayload = {
-			title: "Oy!",
-			body: `${user.username} sent you an Oy!`,
-			icon: "/icon-192.png",
-			badge: "/icon-192.png",
-			type: "oy",
-		};
-
 		return sendOyLike(c, user, {
 			toUserId,
 			type: "oy",
 			payload: null,
-			makeNotificationPayload: () => ({ ...notificationPayload }),
+			makeNotificationPayload: () => oyNotificationPayload(user),
 		});
+	});
+
+	// Oy everyone at once. Undocumented on purpose: reachable from the app by
+	// tapping the header wordmark five times, and by anyone who finds this route.
+	// Recipients get an ordinary Oy — nothing marks it as part of a broadcast.
+	app.post("/api/oy/all", async (c: AppContext) => {
+		const user = c.get("user");
+		if (!user) {
+			return c.json({ error: "Not authenticated" }, 401);
+		}
+
+		const rateKey = `${BROADCAST_RATE_PREFIX}${user.id}`;
+		const rateDataRaw = await c.env.OY2.get(rateKey);
+		const now = Math.floor(Date.now() / 1000);
+		if (rateDataRaw) {
+			const { until } = JSON.parse(rateDataRaw) as BroadcastRateData;
+			return c.json(
+				{
+					error: "You just Oyed everyone. Give them a minute.",
+					retryAfterSeconds: Math.max(until - now, 0),
+				},
+				429,
+			);
+		}
+
+		const friends = await fetchFriends(c.get("dbNoCache"), user.id);
+		if (friends.length === 0) {
+			return c.json({ success: true, sent: 0, recipients: [] });
+		}
+
+		await c.env.OY2.put(
+			rateKey,
+			JSON.stringify({ until: now + BROADCAST_COOLDOWN_SECONDS }),
+			{ expirationTtl: BROADCAST_COOLDOWN_SECONDS },
+		);
+
+		const recipients = await Promise.all(
+			friends.map(async (friend) => {
+				const { streak } = await deliverOyLike(c, user, {
+					toUserId: friend.id,
+					type: "oy",
+					payload: null,
+					makeNotificationPayload: () => oyNotificationPayload(user),
+				});
+				return { id: friend.id, username: friend.username, streak };
+			}),
+		);
+
+		updateLastSeen(c, user.id);
+		return c.json({ success: true, sent: recipients.length, recipients });
 	});
 
 	app.post("/api/lo", async (c: AppContext) => {
@@ -212,7 +292,7 @@ export function registerOyRoutes(app: App) {
 			city,
 		});
 
-		const notificationPayload: PushPayload = {
+		const loNotificationPayload: PushPayload = {
 			title: "Lo!",
 			body: `${user.username} shared a location`,
 			icon: "/icon-192.png",
@@ -225,7 +305,7 @@ export function registerOyRoutes(app: App) {
 			type: "lo",
 			payload,
 			makeNotificationPayload: (oyIdValue) => ({
-				...notificationPayload,
+				...loNotificationPayload,
 				url: `/?tab=oys&oy=${oyIdValue}&expand=location`,
 			}),
 		});

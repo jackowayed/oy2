@@ -23,6 +23,7 @@ export function AppHomeRoute() {
 		loadingLastOyInfo,
 		lastOyInfo,
 		sendOy,
+		sendOyToEveryone,
 		sendLo,
 		locationPermissionNotice,
 		clearLocationPermissionNotice,
@@ -77,7 +78,11 @@ export function AppHomeRoute() {
 
 	return (
 		<Screen>
-			<AppHeader user={user()} onLogout={logout} />
+			<AppHeader
+				user={user()}
+				onLogout={logout}
+				onSecretTap={sendOyToEveryone}
+			/>
 
 			<Tabs.Root value={tab()} onChange={setTab} class="app-tabs-root">
 				<Tabs.List class="app-tabs">

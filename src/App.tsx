@@ -1153,6 +1153,44 @@ export default function App(props: AppProps) {
 		});
 	}
 
+	function recordSentOys(sent: { friendId: number; streak: number }[]) {
+		const user = currentUser() as User;
+		const now = Date.now();
+		const streakByFriendId = new Map(
+			sent.map(({ friendId, streak }) => [friendId, streak]),
+		);
+		setLastOyInfo((prev) => {
+			const updated = prev.map((info) => {
+				const streak = streakByFriendId.get(info.friend_id);
+				return streak === undefined
+					? info
+					: {
+							...info,
+							last_oy_type: "oy",
+							last_oy_created_at: now,
+							last_oy_from_user_id: user.id,
+							streak,
+						};
+			});
+			const known = new Set(prev.map((info) => info.friend_id));
+			const added = sent
+				.filter(({ friendId }) => !known.has(friendId))
+				.map(({ friendId, streak }) => ({
+					friend_id: friendId,
+					last_oy_type: "oy",
+					last_oy_created_at: now,
+					last_oy_from_user_id: user.id,
+					streak,
+				}));
+			const nextInfo = [...updated, ...added];
+			localStorage.setItem(
+				cachedLastOyInfoStorageKey,
+				JSON.stringify(nextInfo),
+			);
+			return nextInfo;
+		});
+	}
+
 	async function sendOy(toUserId: number) {
 		const registration = swRegistration();
 		if (registration) {
@@ -1166,37 +1204,39 @@ export default function App(props: AppProps) {
 				method: "POST",
 				body: JSON.stringify({ toUserId }),
 			});
-			const user = currentUser() as User;
-			const now = Date.now();
-			setLastOyInfo((prev) => {
-				const existing = prev.find((info) => info.friend_id === toUserId);
-				const nextInfo = existing
-					? prev.map((info) =>
-							info.friend_id === toUserId
-								? {
-										...info,
-										last_oy_type: "oy",
-										last_oy_created_at: now,
-										last_oy_from_user_id: user.id,
-										streak,
-									}
-								: info,
-						)
-					: [
-							...prev,
-							{
-								friend_id: toUserId,
-								last_oy_type: "oy",
-								last_oy_created_at: now,
-								last_oy_from_user_id: user.id,
-								streak,
-							},
-						];
-				localStorage.setItem(
-					cachedLastOyInfoStorageKey,
-					JSON.stringify(nextInfo),
-				);
-				return nextInfo;
+			recordSentOys([{ friendId: toUserId, streak }]);
+		} catch (err) {
+			alert((err as Error).message);
+		}
+	}
+
+	// Easter egg: five taps on the header wordmark Oys everyone at once.
+	async function sendOyToEveryone() {
+		const friendCount = friends().length;
+		if (friendCount === 0) {
+			return;
+		}
+		const confirmed = window.confirm(
+			`Send an Oy to all ${friendCount} ${
+				friendCount === 1 ? "friend" : "friends"
+			}?`,
+		);
+		if (!confirmed) {
+			return;
+		}
+
+		try {
+			const { sent, recipients } = await api<{
+				sent: number;
+				recipients: { id: number; streak: number }[];
+			}>("/api/oy/all", { method: "POST" });
+			recordSentOys(
+				recipients.map(({ id, streak }) => ({ friendId: id, streak })),
+			);
+			addOyToast({
+				id: Date.now(),
+				title: "Oy to everyone!",
+				body: `Sent to ${sent} ${sent === 1 ? "friend" : "friends"}.`,
 			});
 		} catch (err) {
 			alert((err as Error).message);
@@ -1703,6 +1743,7 @@ export default function App(props: AppProps) {
 		deleteAccount,
 		handleSetupNotifications,
 		sendOy,
+		sendOyToEveryone,
 		sendLo,
 		locationPermissionNotice,
 		clearLocationPermissionNotice,

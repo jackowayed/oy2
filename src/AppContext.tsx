@@ -29,6 +29,7 @@ export type AppContextValue = {
 	deleteAccount: () => Promise<void>;
 	handleSetupNotifications: () => Promise<void>;
 	sendOy: (toUserId: number) => Promise<void>;
+	sendOyToEveryone: () => Promise<void>;
 	sendLo: (toUserId: number) => Promise<void>;
 	locationPermissionNotice: Accessor<LocationPermissionNotice | null>;
 	clearLocationPermissionNotice: () => void;
