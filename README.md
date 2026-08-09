@@ -165,6 +165,24 @@ oy2/
 └── package.json
 ```
 
+## Broadcast Script
+
+`scripts/broadcast-oy.mjs` sends an Oy to every one of your friends through the
+public API. It has no dependencies and no build step — copy the file anywhere
+and run it with Node 20+.
+
+```bash
+node scripts/broadcast-oy.mjs login      # email-code sign in, saves a token
+node scripts/broadcast-oy.mjs friends    # list who would receive an Oy
+node scripts/broadcast-oy.mjs send --dry-run
+node scripts/broadcast-oy.mjs send
+```
+
+The token is saved to `~/.oy-cli.json` (override with `--token-file`, or skip
+the file entirely with `OY_TOKEN`). Point it at another deployment with
+`--base-url` / `OY_BASE_URL`. `send` also takes `--only`, `--exclude`,
+`--delay`, and `--yes`.
+
 ## API Endpoints
 
 ### Auth
