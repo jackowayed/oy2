@@ -1,7 +1,8 @@
 import {
 	computeStreakLength,
 	createOyAndNotification,
-	fetchFriends,
+	delay,
+	fetchFriendsByOyRecency,
 	getStreakDateBoundaries,
 	sendPushNotifications,
 	updateLastSeen,
@@ -62,6 +63,8 @@ async function reverseGeocodeCity(
 
 const BROADCAST_RATE_PREFIX = "oy_broadcast_rate:";
 const BROADCAST_COOLDOWN_SECONDS = 15 * 60;
+const BROADCAST_MAX_RECIPIENTS = 50;
+const BROADCAST_SEND_INTERVAL_MS = 20;
 
 type BroadcastRateData = {
 	until: number;
@@ -234,7 +237,11 @@ export function registerOyRoutes(app: App) {
 			);
 		}
 
-		const friends = await fetchFriends(c.get("dbNoCache"), user.id);
+		const friends = await fetchFriendsByOyRecency(
+			c.get("dbNoCache"),
+			user.id,
+			BROADCAST_MAX_RECIPIENTS,
+		);
 		if (friends.length === 0) {
 			return c.json({ success: true, sent: 0, recipients: [] });
 		}
@@ -245,17 +252,21 @@ export function registerOyRoutes(app: App) {
 			{ expirationTtl: BROADCAST_COOLDOWN_SECONDS },
 		);
 
-		const recipients = await Promise.all(
-			friends.map(async (friend) => {
-				const { streak } = await deliverOyLike(c, user, {
-					toUserId: friend.id,
-					type: "oy",
-					payload: null,
-					makeNotificationPayload: () => oyNotificationPayload(user),
-				});
-				return { id: friend.id, username: friend.username, streak };
-			}),
-		);
+		// Paced rather than fired in parallel, so a broadcast lands as a trickle
+		// of Oys instead of one spike of writes and push deliveries.
+		const recipients: { id: number; username: string; streak: number }[] = [];
+		for (const friend of friends) {
+			if (recipients.length > 0) {
+				await delay(BROADCAST_SEND_INTERVAL_MS);
+			}
+			const { streak } = await deliverOyLike(c, user, {
+				toUserId: friend.id,
+				type: "oy",
+				payload: null,
+				makeNotificationPayload: () => oyNotificationPayload(user),
+			});
+			recipients.push({ id: friend.id, username: friend.username, streak });
+		}
 
 		updateLastSeen(c, user.id);
 		return c.json({ success: true, sent: recipients.length, recipients });

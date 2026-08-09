@@ -1186,6 +1186,58 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 		}
 		if (
 			sql.startsWith("SELECT u.id, u.username, f.nickname FROM friendships f") &&
+			sql.includes("ORDER BY loi.last_oy_created_at DESC NULLS LAST")
+		) {
+			const [userId, limit] = this.params as [number, number];
+			const results = this.db.friendships
+				.filter(
+					(row) =>
+						row.user_id === userId &&
+						!this.db.userBlocks.some(
+							(block) =>
+								(block.blocker_user_id === row.user_id &&
+									block.blocked_user_id === row.friend_id) ||
+								(block.blocker_user_id === row.friend_id &&
+									block.blocked_user_id === row.user_id),
+						),
+				)
+				.map((row) => {
+					const user = this.db.users.find((u) => u.id === row.friend_id);
+					if (!user) {
+						return null;
+					}
+					const info = this.db.lastOyInfo.find(
+						(candidate) =>
+							candidate.user_id === row.user_id &&
+							candidate.friend_id === row.friend_id,
+					);
+					return {
+						id: user.id,
+						username: user.username,
+						nickname: row.nickname,
+						lastOyCreatedAt: info?.last_oy_created_at ?? null,
+					};
+				})
+				.filter((row) => row !== null)
+				.sort((a, b) => {
+					if (a.lastOyCreatedAt !== b.lastOyCreatedAt) {
+						// NULLS LAST, then most recent first.
+						if (a.lastOyCreatedAt === null) {
+							return 1;
+						}
+						if (b.lastOyCreatedAt === null) {
+							return -1;
+						}
+						return b.lastOyCreatedAt - a.lastOyCreatedAt;
+					}
+					return a.username.localeCompare(b.username);
+				})
+				.slice(0, limit)
+				.map(({ id, username, nickname }) => ({ id, username, nickname }));
+			return { results };
+		}
+		if (
+			sql.startsWith("SELECT u.id, u.username, f.nickname FROM friendships f") &&
 			sql.includes("INNER JOIN users u")
 		) {
 			const [userId] = this.params as [number];

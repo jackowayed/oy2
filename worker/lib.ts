@@ -46,7 +46,7 @@ type PushSendResult = {
 	attempts: PushAttempt[];
 };
 
-const delay = (ms: number) =>
+export const delay = (ms: number) =>
 	new Promise((resolve) => {
 		setTimeout(resolve, ms);
 	});
@@ -594,6 +594,39 @@ export async function fetchFriends(db: DbClient, userId: number) {
     ORDER BY u.username
   `,
 		[userId],
+	);
+	return friends.rows;
+}
+
+// Same visibility rules as fetchFriends, but ordered the way the friends list
+// is: most recent Oy or Lo first, friends you have never exchanged one with
+// last. Capped so a broadcast stays bounded on large friend graphs.
+export async function fetchFriendsByOyRecency(
+	db: DbClient,
+	userId: number,
+	limit: number,
+) {
+	const friends = await db.query<FriendListRow>(
+		`
+    SELECT
+      u.id,
+      u.username,
+      f.nickname
+    FROM friendships f
+    INNER JOIN users u ON u.id = f.friend_id
+    LEFT JOIN last_oy_info loi
+      ON loi.user_id = f.user_id AND loi.friend_id = f.friend_id
+    LEFT JOIN user_blocks b1
+      ON b1.blocker_user_id = f.user_id AND b1.blocked_user_id = f.friend_id
+    LEFT JOIN user_blocks b2
+      ON b2.blocker_user_id = f.friend_id AND b2.blocked_user_id = f.user_id
+    WHERE f.user_id = $1
+      AND b1.blocker_user_id IS NULL
+      AND b2.blocker_user_id IS NULL
+    ORDER BY loi.last_oy_created_at DESC NULLS LAST, u.username
+    LIMIT $2
+  `,
+		[userId, limit],
 	);
 	return friends.rows;
 }

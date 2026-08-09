@@ -69,6 +69,9 @@ const googleWebClientId = import.meta.env.VITE_GOOGLE_WEB_CLIENT_ID;
 const googleIosClientId = import.meta.env.VITE_GOOGLE_IOS_CLIENT_ID;
 const appleNativeClientId = import.meta.env.VITE_APPLE_NATIVE_CLIENT_ID;
 const androidNativePushChannelId = "oy_notifications_v1";
+// Mirrors BROADCAST_MAX_RECIPIENTS in worker/routes/oys.ts; only used to keep
+// the confirmation honest about how many friends will actually get an Oy.
+const broadcastRecipientLimit = 50;
 const nativePushSoundFile = "oy.wav";
 
 type AuthStep =
@@ -1217,9 +1220,11 @@ export default function App(props: AppProps) {
 			return;
 		}
 		const confirmed = window.confirm(
-			`Send an Oy to all ${friendCount} ${
-				friendCount === 1 ? "friend" : "friends"
-			}?`,
+			friendCount > broadcastRecipientLimit
+				? `Send an Oy to your ${broadcastRecipientLimit} most recent friends?`
+				: `Send an Oy to all ${friendCount} ${
+						friendCount === 1 ? "friend" : "friends"
+					}?`,
 		);
 		if (!confirmed) {
 			return;
