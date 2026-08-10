@@ -179,6 +179,121 @@ describe("auth", () => {
 		assert.equal(json.error, "Not authenticated");
 	});
 
+	it("revokes the current token on logout", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "LogoutRevoke" });
+		seedSession(db, user.id, "revoke-logout");
+		const jwt = await signTestJwt(env, user, "revoke-logout");
+
+		const before = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(before.res.status, 200);
+
+		const logout = await jsonRequest(env, "/api/auth/logout", {
+			method: "POST",
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(logout.res.status, 200);
+		assert.equal(logout.json.success, true);
+
+		// The SAME unexpired JWT must now be rejected on the fast path.
+		const after = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(after.res.status, 401);
+		assert.equal(after.json.error, "Not authenticated");
+	});
+
+	it("revokes the current token on account deletion", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "DeleteRevoke" });
+		seedSession(db, user.id, "revoke-delete");
+		const jwt = await signTestJwt(env, user, "revoke-delete");
+
+		const before = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(before.res.status, 200);
+
+		const del = await jsonRequest(env, "/api/auth/account", {
+			method: "DELETE",
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(del.res.status, 200);
+		assert.equal(del.json.success, true);
+
+		const after = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(after.res.status, 401);
+		assert.equal(after.json.error, "Not authenticated");
+	});
+
+	it("revokes other device sessions on account deletion", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "MultiDevice" });
+		seedSession(db, user.id, "device-a");
+		seedSession(db, user.id, "device-b");
+		const jwtA = await signTestJwt(env, user, "device-a");
+		const jwtB = await signTestJwt(env, user, "device-b");
+
+		// Delete the account using device A's JWT.
+		const del = await jsonRequest(env, "/api/auth/account", {
+			method: "DELETE",
+			headers: { "x-session-token": jwtA },
+		});
+		assert.equal(del.res.status, 200);
+
+		// Device B holds a different, still-unexpired sid; it must be revoked too.
+		const other = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwtB },
+		});
+		assert.equal(other.res.status, 401);
+		assert.equal(other.json.error, "Not authenticated");
+	});
+
+	it("logout only revokes the current device session", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "TwoDevices" });
+		seedSession(db, user.id, "logout-a");
+		seedSession(db, user.id, "logout-b");
+		const jwtA = await signTestJwt(env, user, "logout-a");
+		const jwtB = await signTestJwt(env, user, "logout-b");
+
+		const logout = await jsonRequest(env, "/api/auth/logout", {
+			method: "POST",
+			headers: { "x-session-token": jwtA },
+		});
+		assert.equal(logout.res.status, 200);
+
+		// Session A is revoked.
+		const a = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwtA },
+		});
+		assert.equal(a.res.status, 401);
+
+		// Session B on another device is untouched.
+		const b = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwtB },
+		});
+		assert.equal(b.res.status, 200);
+		assert.equal((b.json as { user: { username: string } }).user.username, "TwoDevices");
+	});
+
+	it("authenticates a valid JWT when nothing has been revoked", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "NeverRevoked" });
+		seedSession(db, user.id, "clean-session");
+		const jwt = await signTestJwt(env, user, "clean-session");
+
+		const { res, json } = await jsonRequest(env, "/api/auth/session", {
+			headers: { "x-session-token": jwt },
+		});
+		assert.equal(res.status, 200);
+		assert.equal((json as { user: { username: string } }).user.username, "NeverRevoked");
+	});
+
 	it("rejects profane usernames in availability checks", async () => {
 		const { env } = createTestEnv();
 		const { res, json } = await jsonRequest(env, "/api/auth/username/check", {

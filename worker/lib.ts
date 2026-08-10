@@ -13,6 +13,7 @@ const PUSH_BACKOFF_MS = 250;
 const PUSH_BACKOFF_MULTIPLIER = 2;
 const AUTH_JWT_TTL_SECONDS = 60 * 60 * 24 * 7;
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+const REVOKED_SESSION_PREFIX = "revoked_session:";
 
 type AuthJwtPayload = {
 	sub: string;
@@ -176,6 +177,16 @@ export async function verifyAuthJwt(
 	} catch (_err) {
 		return { status: "invalid" };
 	}
+}
+
+export async function revokeSession(c: AppContext, sid: string) {
+	await c.env.OY2.put(`${REVOKED_SESSION_PREFIX}${sid}`, "1", {
+		expirationTtl: AUTH_JWT_TTL_SECONDS,
+	});
+}
+
+export async function isSessionRevoked(c: AppContext, sid: string) {
+	return (await c.env.OY2.get(`${REVOKED_SESSION_PREFIX}${sid}`)) !== null;
 }
 
 export function setAuthCookies(c: AppContext, token: string, user: User) {

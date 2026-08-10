@@ -3,6 +3,7 @@ import { getCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { Client } from "pg";
 import {
+	isSessionRevoked,
 	setAuthCookies,
 	signAuthJwt,
 	userFromAuthJwtPayload,
@@ -83,8 +84,14 @@ app.use("*", async (c: AppContext, next) => {
 		try {
 			const verified = await verifyAuthJwt(c, sessionToken);
 			if (verified.status === "valid") {
-				c.set("user", userFromAuthJwtPayload(verified.payload));
-				c.set("sessionToken", verified.payload.sid);
+				// Fast path: trust the unexpired JWT unless its session id has
+				// been revoked (logout / account deletion). A revoked sid leaves
+				// user/sessionToken null so the request is treated as logged
+				// out, and no refreshed cookies are set.
+				if (!(await isSessionRevoked(c, verified.payload.sid))) {
+					c.set("user", userFromAuthJwtPayload(verified.payload));
+					c.set("sessionToken", verified.payload.sid);
+				}
 			} else {
 				const lookupToken =
 					verified.status === "expired" ? verified.payload.sid : sessionToken;

@@ -1,5 +1,5 @@
 import { deleteCookie } from "hono/cookie";
-import { authUserPayload, validateUsername } from "../lib";
+import { authUserPayload, revokeSession, validateUsername } from "../lib";
 import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
@@ -82,6 +82,10 @@ export function registerAuthRoutes(app: App) {
 		await c
 			.get("db")
 			.query("DELETE FROM sessions WHERE token = $1", [sessionToken]);
+		// Deleting the session row only stops the refresh of an expired JWT.
+		// Revoke this sid so any still-unexpired JWT is rejected on the fast
+		// path. Per-device logout: revoke only the current sid.
+		await revokeSession(c, sessionToken);
 		clearSessionCookie(c);
 
 		return c.json({ success: true });
@@ -115,6 +119,18 @@ export function registerAuthRoutes(app: App) {
 				429,
 			);
 		}
+
+		// Account deletion must kill EVERY session of the user, not just the
+		// current one: other devices may hold unexpired JWTs whose sid isn't
+		// the current sid. Revoke each before the cascade delete removes the
+		// sessions rows.
+		const sessions = await c
+			.get("db")
+			.query<{ token: string }>(
+				"SELECT token FROM sessions WHERE user_id = $1",
+				[user.id],
+			);
+		await Promise.all(sessions.rows.map((row) => revokeSession(c, row.token)));
 
 		await c.get("db").query("DELETE FROM users WHERE id = $1", [user.id]);
 		clearSessionCookie(c);
