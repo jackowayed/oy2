@@ -1,12 +1,10 @@
-import { computeStreakLength, getStreakDateBoundaries } from "../lib";
+import {
+	computeStreakLength,
+	fetchFriends,
+	getStreakDateBoundaries,
+} from "../lib";
 import { containsAbusiveText } from "../moderation";
-import type {
-	App,
-	FriendListRow,
-	FriendProfileRow,
-	LastOyInfoRow,
-	User,
-} from "../types";
+import type { App, FriendProfileRow, LastOyInfoRow, User } from "../types";
 
 const parseFriendId = (
 	friendIdRaw: string | undefined,
@@ -106,27 +104,9 @@ export function registerFriendRoutes(app: App) {
 
 		const noCache = c.req.query("no-cache") === "true";
 		const db = noCache ? c.get("dbNoCache") : c.get("db");
-		const friends = await db.query<FriendListRow>(
-			`
-    SELECT
-      u.id,
-      u.username,
-      f.nickname
-    FROM friendships f
-    INNER JOIN users u ON u.id = f.friend_id
-    LEFT JOIN user_blocks b1
-      ON b1.blocker_user_id = f.user_id AND b1.blocked_user_id = f.friend_id
-    LEFT JOIN user_blocks b2
-      ON b2.blocker_user_id = f.friend_id AND b2.blocked_user_id = f.user_id
-    WHERE f.user_id = $1
-      AND b1.blocker_user_id IS NULL
-      AND b2.blocker_user_id IS NULL
-    ORDER BY u.username
-  `,
-			[user.id],
-		);
+		const friends = await fetchFriends(db, user.id);
 
-		const friendResults = friends.rows.map((row) => ({
+		const friendResults = friends.map((row) => ({
 			id: row.id,
 			username: row.username,
 			nickname: row.nickname,

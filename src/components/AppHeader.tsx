@@ -1,14 +1,18 @@
 import { Button } from "@kobalte/core/button";
 import { A } from "@solidjs/router";
-import { createSignal } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 import { appLogoText } from "../branding";
 import type { User } from "../types";
 import "./ButtonStyles.css";
 import "./AppHeader.css";
 
+const SECRET_TAP_COUNT = 5;
+const SECRET_TAP_WINDOW_MS = 3000;
+
 type AppHeaderProps = {
 	class?: string;
 	backHref?: string;
+	onSecretTap?: () => void;
 } & (
 	| {
 			user: User;
@@ -24,6 +28,26 @@ export function AppHeader(props: AppHeaderProps) {
 	const [menuOpen, setMenuOpen] = createSignal(false);
 	const hasBackLink = Boolean(props.backHref);
 	const backHref = props.backHref ?? "/";
+	let tapCount = 0;
+	let tapTimeoutId: number | undefined;
+
+	const onTitleTap = () => {
+		const onSecretTap = props.onSecretTap;
+		if (!onSecretTap) {
+			return;
+		}
+		window.clearTimeout(tapTimeoutId);
+		tapCount += 1;
+		if (tapCount >= SECRET_TAP_COUNT) {
+			tapCount = 0;
+			onSecretTap();
+			return;
+		}
+		tapTimeoutId = window.setTimeout(() => {
+			tapCount = 0;
+		}, SECRET_TAP_WINDOW_MS);
+	};
+	onCleanup(() => window.clearTimeout(tapTimeoutId));
 
 	return (
 		<div class={`app-header ${props.class ?? ""}`.trim()}>
@@ -36,7 +60,11 @@ export function AppHeader(props: AppHeaderProps) {
 						<span>Back</span>
 					</A>
 				) : null}
-				<h1 class="app-title">{appLogoText}</h1>
+				<h1 class="app-title">
+					<button class="app-title-tap" type="button" onClick={onTitleTap}>
+						{appLogoText}
+					</button>
+				</h1>
 				{props.user ? (
 					<button
 						class="app-user-trigger"

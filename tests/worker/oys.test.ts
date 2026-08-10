@@ -634,4 +634,225 @@ describe("oys and los", () => {
 		assert.equal(res.status, 200);
 		assert.equal(body.oys.length, 0);
 	});
+	describe("oy everyone", () => {
+		it("requires authentication", async () => {
+			const { env } = createTestEnv();
+			const { res, json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+			});
+			assert.equal(res.status, 401);
+			assert.equal(json.error, "Not authenticated");
+		});
+
+		it("sends an oy to every friend", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			const first = seedUser(db, { username: "First" });
+			const second = seedUser(db, { username: "Second" });
+			const stranger = seedUser(db, { username: "Stranger" });
+			seedSession(db, sender.id, "oy-all-token");
+			for (const friend of [first, second]) {
+				seedFriendship(db, sender.id, friend.id);
+				seedFriendship(db, friend.id, sender.id);
+			}
+
+			const { res, json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-token" },
+			});
+			assert.equal(res.status, 200);
+			assert.equal(json.sent, 2);
+			assert.deepEqual(
+				(json.recipients as Array<{ username: string }>)
+					.map((recipient) => recipient.username)
+					.sort(),
+				["First", "Second"],
+			);
+			assert.equal(db.oys.length, 2);
+			assert.deepEqual(
+				db.oys.map((oy) => oy.to_user_id).sort(),
+				[first.id, second.id].sort(),
+			);
+			assert.equal(db.notifications.length, 2);
+			assert.equal(
+				db.oys.some((oy) => oy.to_user_id === stranger.id),
+				false,
+			);
+		});
+
+		it("looks like an ordinary oy to recipients", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			const receiver = seedUser(db, { username: "Receiver" });
+			seedSession(db, sender.id, "oy-all-payload-token");
+			seedFriendship(db, sender.id, receiver.id);
+			seedFriendship(db, receiver.id, sender.id);
+
+			await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-payload-token" },
+			});
+
+			const payload = JSON.parse(db.notifications[0].payload) as {
+				title: string;
+				body: string;
+				type: string;
+			};
+			assert.equal(payload.title, "Oy!");
+			assert.equal(payload.body, "Sender sent you an Oy!");
+			assert.equal(payload.type, "oy");
+			assert.equal(db.oys[0].type, "oy");
+		});
+
+		it("skips blocked friends", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			const friend = seedUser(db, { username: "Friend" });
+			const blocked = seedUser(db, { username: "Blocked" });
+			seedSession(db, sender.id, "oy-all-block-token");
+			for (const other of [friend, blocked]) {
+				seedFriendship(db, sender.id, other.id);
+				seedFriendship(db, other.id, sender.id);
+			}
+			await jsonRequest(env, `/api/friends/${blocked.id}/block`, {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-block-token" },
+			});
+
+			const { json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-block-token" },
+			});
+			assert.equal(json.sent, 1);
+			assert.equal(db.oys.length, 1);
+			assert.equal(db.oys[0].to_user_id, friend.id);
+		});
+
+		it("succeeds without sending anything when you have no friends", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Lonely" });
+			seedSession(db, sender.id, "oy-all-empty-token");
+
+			const { res, json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-empty-token" },
+			});
+			assert.equal(res.status, 200);
+			assert.equal(json.sent, 0);
+			assert.equal(db.oys.length, 0);
+		});
+
+		it("sends to the 50 most recent friends and skips the rest", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			seedSession(db, sender.id, "oy-all-cap-token");
+			const friends = Array.from({ length: 52 }, (_, index) => {
+				const friend = seedUser(db, {
+					username: `Friend${String(index).padStart(2, "0")}`,
+				});
+				seedFriendship(db, sender.id, friend.id);
+				seedFriendship(db, friend.id, sender.id);
+				// Higher index means a more recent Oy between the two of you.
+				seedLastOyInfo(db, {
+					userId: sender.id,
+					friendId: friend.id,
+					lastOyCreatedAt: 1000 + index,
+				});
+				return friend;
+			});
+
+			const { res, json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-cap-token" },
+			});
+			assert.equal(res.status, 200);
+			assert.equal(json.sent, 50);
+			assert.equal(db.oys.length, 50);
+
+			const recipients = json.recipients as Array<{ id: number }>;
+			// Most recent first, and the two stalest friends are left out.
+			assert.equal(recipients[0].id, friends[51].id);
+			assert.equal(recipients[49].id, friends[2].id);
+			const oyedIds = new Set(db.oys.map((oy) => oy.to_user_id));
+			assert.equal(oyedIds.has(friends[0].id), false);
+			assert.equal(oyedIds.has(friends[1].id), false);
+		});
+
+		it("orders recipients by oy recency, never-oyed friends last", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			const stale = seedUser(db, { username: "Stale" });
+			const recent = seedUser(db, { username: "Recent" });
+			const never = seedUser(db, { username: "Never" });
+			seedSession(db, sender.id, "oy-all-order-token");
+			for (const friend of [stale, recent, never]) {
+				seedFriendship(db, sender.id, friend.id);
+				seedFriendship(db, friend.id, sender.id);
+			}
+			seedLastOyInfo(db, {
+				userId: sender.id,
+				friendId: stale.id,
+				lastOyCreatedAt: 100,
+			});
+			seedLastOyInfo(db, {
+				userId: sender.id,
+				friendId: recent.id,
+				lastOyCreatedAt: 900,
+			});
+
+			const { json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-order-token" },
+			});
+			assert.deepEqual(
+				(json.recipients as Array<{ username: string }>).map(
+					(recipient) => recipient.username,
+				),
+				["Recent", "Stale", "Never"],
+			);
+		});
+
+		it("rate limits repeat broadcasts", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			const receiver = seedUser(db, { username: "Receiver" });
+			seedSession(db, sender.id, "oy-all-rate-token");
+			seedFriendship(db, sender.id, receiver.id);
+			seedFriendship(db, receiver.id, sender.id);
+
+			await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-rate-token" },
+			});
+			const { res, json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-rate-token" },
+			});
+			assert.equal(res.status, 429);
+			assert.equal(json.error, "You just Oyed everyone. Give them a minute.");
+			assert.ok((json.retryAfterSeconds as number) > 0);
+			assert.equal(db.oys.length, 1);
+		});
+
+		it("does not burn the cooldown when there is nobody to oy", async () => {
+			const { env, db } = createTestEnv();
+			const sender = seedUser(db, { username: "Sender" });
+			seedSession(db, sender.id, "oy-all-no-burn-token");
+
+			await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-no-burn-token" },
+			});
+
+			const receiver = seedUser(db, { username: "Receiver" });
+			seedFriendship(db, sender.id, receiver.id);
+			seedFriendship(db, receiver.id, sender.id);
+			const { res, json } = await jsonRequest(env, "/api/oy/all", {
+				method: "POST",
+				headers: { "x-session-token": "oy-all-no-burn-token" },
+			});
+			assert.equal(res.status, 200);
+			assert.equal(json.sent, 1);
+		});
+	});
 });
