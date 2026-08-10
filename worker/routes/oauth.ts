@@ -2,10 +2,11 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
 	authUserPayload,
 	createSession,
+	normalizeUsername,
 	setAuthCookies,
 	updateLastSeen,
+	validateUsername,
 } from "../lib";
-import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
 const OAUTH_STATE_PREFIX = "oauth_state:";
@@ -275,9 +276,8 @@ async function tryCreateOAuthUser(
 	sub: string,
 	email: string | undefined,
 ): Promise<OAuthUserResult | null> {
-	const trimmed = username.trim().toLowerCase();
-	if (!trimmed) return null;
-	if (validateCleanUsername(trimmed)) return null;
+	const trimmed = normalizeUsername(username);
+	if (validateUsername(trimmed)) return null;
 
 	const existing = await c
 		.get("db")
@@ -731,16 +731,14 @@ export function registerOAuthRoutes(app: App) {
 		};
 
 		const { username } = await c.req.json();
-		const trimmedUsername = String(username || "")
-			.trim()
-			.toLowerCase();
+		const trimmedUsername = normalizeUsername(username);
 
 		if (!trimmedUsername) {
 			return c.json({ error: "Username is required" }, 400);
 		}
-		const moderationError = validateCleanUsername(trimmedUsername);
-		if (moderationError) {
-			return c.json({ error: moderationError }, 400);
+		const usernameError = validateUsername(trimmedUsername);
+		if (usernameError) {
+			return c.json({ error: usernameError }, 400);
 		}
 
 		const result = await tryCreateOAuthUser(
@@ -866,9 +864,9 @@ export function registerOAuthRoutes(app: App) {
 
 		// New user with username provided — try to create
 		if (username) {
-			const moderationError = validateCleanUsername(username);
-			if (moderationError) {
-				return c.json({ error: moderationError }, 400);
+			const usernameError = validateUsername(normalizeUsername(username));
+			if (usernameError) {
+				return c.json({ error: usernameError }, 400);
 			}
 			const result = await tryCreateOAuthUser(
 				c,
@@ -975,9 +973,9 @@ export function registerOAuthRoutes(app: App) {
 
 		// New user with username provided — try to create
 		if (username) {
-			const moderationError = validateCleanUsername(username);
-			if (moderationError) {
-				return c.json({ error: moderationError }, 400);
+			const usernameError = validateUsername(normalizeUsername(username));
+			if (usernameError) {
+				return c.json({ error: usernameError }, 400);
 			}
 			const result = await tryCreateOAuthUser(
 				c,

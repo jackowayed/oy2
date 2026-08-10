@@ -2,10 +2,11 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
 	authUserPayload,
 	createSession,
+	normalizeUsername,
 	setAuthCookies,
 	updateLastSeen,
+	validateUsername,
 } from "../lib";
-import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
 const EMAIL_CODE_PREFIX = "email_code:";
@@ -338,16 +339,14 @@ export function registerEmailRoutes(app: App) {
 		const { email } = JSON.parse(pendingData) as { email: string };
 
 		const body = await c.req.json();
-		const trimmedUsername = String(body.username || "")
-			.trim()
-			.toLowerCase();
+		const trimmedUsername = normalizeUsername(body.username);
 
 		if (!trimmedUsername) {
 			return c.json({ error: "Username is required" }, 400);
 		}
-		const moderationError = validateCleanUsername(trimmedUsername);
-		if (moderationError) {
-			return c.json({ error: moderationError }, 400);
+		const usernameError = validateUsername(trimmedUsername);
+		if (usernameError) {
+			return c.json({ error: usernameError }, 400);
 		}
 
 		// Check if username exists
