@@ -46,7 +46,13 @@ export default defineConfig({
         ],
       },
     }),
-    cloudflare(),
+    // Wrangler installs a global undici ProxyAgent whenever HTTPS_PROXY is set,
+    // and that dispatcher ignores NO_PROXY. Miniflare's inspector proxy reaches
+    // workerd with `fetch('http://127.0.0.1:<port>/json')`, so in a proxied
+    // sandbox that loopback call is tunnelled to the egress proxy, which
+    // rejects it, and the dev server dies parsing the error body as JSON.
+    // The inspector is only devtools sugar, so drop it when a proxy is present.
+    cloudflare({ inspectorPort: process.env.HTTPS_PROXY ? false : undefined }),
   ],
   server: {
     port: 5173,
