@@ -336,7 +336,10 @@ export function registerPasskeyRoutes(app: App) {
 			return c.json({ error: "Not authenticated" }, 401);
 		}
 
-		const passkeyId = parseInt(c.req.param("id"), 10);
+		const passkeyId = Number(c.req.param("id"));
+		if (!Number.isInteger(passkeyId)) {
+			return c.json({ error: "Invalid id" }, 400);
+		}
 
 		// Verify ownership
 		const result = await c
