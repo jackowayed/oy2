@@ -1,6 +1,5 @@
 import { deleteCookie } from "hono/cookie";
-import { authUserPayload, validateUsername } from "../lib";
-import { validateCleanUsername } from "../moderation";
+import { authUserPayload, normalizeUsername, validateUsername } from "../lib";
 import type { App, AppContext, User } from "../types";
 
 const DELETE_RATE_PREFIX = "account_delete_rate:";
@@ -30,27 +29,11 @@ export function registerAuthRoutes(app: App) {
 
 	app.post("/api/auth/username/check", async (c: AppContext) => {
 		const { username } = await c.req.json();
-		const trimmed = String(username || "")
-			.trim()
-			.toLowerCase();
+		const trimmed = normalizeUsername(username);
 
 		const formatError = validateUsername(trimmed);
 		if (formatError) {
 			return c.json({ available: false, error: formatError }, 400);
-		}
-		const moderationError = validateCleanUsername(trimmed);
-		if (moderationError) {
-			return c.json({ available: false, error: moderationError }, 400);
-		}
-
-		if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
-			return c.json(
-				{
-					available: false,
-					error: "Username can only contain letters, numbers, and underscores",
-				},
-				400,
-			);
 		}
 
 		const existing = await c

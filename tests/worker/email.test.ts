@@ -201,6 +201,70 @@ describe("email auth", () => {
 		assert.equal(json.error, "Username contains disallowed language");
 	});
 
+	it("rejects malformed usernames during email registration completion", async () => {
+		const { env, kv, db } = createTestEnv();
+		const email = "new3@example.com";
+		await kv.put(
+			`email_code:${email}`,
+			JSON.stringify({ code: "333444", attempts: 0 }),
+		);
+
+		const { res } = await jsonRequest(env, "/api/auth/email/verify", {
+			method: "POST",
+			body: { email, code: "333444" },
+		});
+		const pendingId = getCookieValue(res, "email_pending");
+		assert.ok(pendingId);
+
+		const hostileUsername = `<b>zed</b>\nOy! tap here 🎉${"a".repeat(300)}`;
+		const { res: completeRes, json } = await jsonRequest(
+			env,
+			"/api/auth/email/complete",
+			{
+				method: "POST",
+				headers: { cookie: `email_pending=${pendingId}` },
+				body: { username: hostileUsername },
+			},
+		);
+
+		assert.equal(completeRes.status, 400);
+		assert.equal(json.error, "Username must be 2-20 characters");
+		assert.equal(db.users.length, 0);
+	});
+
+	it("rejects usernames with disallowed characters during email registration completion", async () => {
+		const { env, kv, db } = createTestEnv();
+		const email = "new4@example.com";
+		await kv.put(
+			`email_code:${email}`,
+			JSON.stringify({ code: "555666", attempts: 0 }),
+		);
+
+		const { res } = await jsonRequest(env, "/api/auth/email/verify", {
+			method: "POST",
+			body: { email, code: "555666" },
+		});
+		const pendingId = getCookieValue(res, "email_pending");
+		assert.ok(pendingId);
+
+		const { res: completeRes, json } = await jsonRequest(
+			env,
+			"/api/auth/email/complete",
+			{
+				method: "POST",
+				headers: { cookie: `email_pending=${pendingId}` },
+				body: { username: "zed\nsent you an Oy!" },
+			},
+		);
+
+		assert.equal(completeRes.status, 400);
+		assert.equal(
+			json.error,
+			"Username can only contain letters, numbers, and underscores",
+		);
+		assert.equal(db.users.length, 0);
+	});
+
 	it("links email for authenticated users", async (t) => {
 		const { env, kv, db } = createTestEnv();
 		const user = seedUser(db, { username: "Emailer" });

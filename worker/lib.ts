@@ -1,4 +1,5 @@
 import { setCookie } from "hono/cookie";
+import { validateCleanUsername } from "./moderation";
 import { sendNativePushNotification, sendPushNotification } from "./push";
 import type {
 	AppContext,
@@ -542,15 +543,32 @@ export function authUserPayload(user: User) {
 	};
 }
 
+const USERNAME_MIN_LENGTH = 2;
+const USERNAME_MAX_LENGTH = 20;
+const USERNAME_PATTERN = /^[a-zA-Z0-9_]+$/;
+
+// Usernames are stored lowercase; every lookup compares on LOWER(username).
 export function normalizeUsername(username: unknown) {
-	return String(username || "").trim();
+	return String(username ?? "")
+		.trim()
+		.toLowerCase();
 }
 
+// The single gate for every username that reaches the users table. Usernames
+// are rendered as push notification copy, so anything but a short ASCII
+// identifier is rejected here rather than at the advisory check endpoint.
 export function validateUsername(username: string) {
-	if (!username || username.length < 2 || username.length > 20) {
-		return "Username must be 2-20 characters";
+	if (
+		!username ||
+		username.length < USERNAME_MIN_LENGTH ||
+		username.length > USERNAME_MAX_LENGTH
+	) {
+		return `Username must be ${USERNAME_MIN_LENGTH}-${USERNAME_MAX_LENGTH} characters`;
 	}
-	return null;
+	if (!USERNAME_PATTERN.test(username)) {
+		return "Username can only contain letters, numbers, and underscores";
+	}
+	return validateCleanUsername(username);
 }
 
 export async function createSession(c: AppContext, user: User) {
@@ -629,16 +647,6 @@ export async function fetchFriendsByOyRecency(
 		[userId, limit],
 	);
 	return friends.rows;
-}
-
-export async function fetchUserByUsername(
-	c: AppContext,
-	username: string,
-): Promise<User | null> {
-	const result = await c
-		.get("db")
-		.query<User>("SELECT * FROM users WHERE username ILIKE $1", [username]);
-	return result.rows[0] ?? null;
 }
 
 export async function requireAdmin(c: AppContext) {

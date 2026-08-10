@@ -548,4 +548,207 @@ describe("oauth", () => {
 		assert.equal(user.oauth_sub, null);
 		assert.equal(db.sessions.length, 0);
 	});
+
+	it("rejects malformed usernames during oauth completion", async () => {
+		const { env, kv, db } = createTestEnv();
+		await kv.put(
+			"oauth_pending:pending-hostile",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-hostile",
+				email: "hostile@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-hostile",
+			},
+			body: JSON.stringify({
+				username: `<b>zed</b>\nOy! tap here 🎉${"a".repeat(300)}`,
+			}),
+		});
+
+		assert.equal(res.status, 400);
+		const body = (await res.json()) as { error: string };
+		assert.equal(body.error, "Username must be 2-20 characters");
+		assert.equal(db.users.length, 0);
+		assert.equal(db.sessions.length, 0);
+	});
+
+	it("rejects usernames with disallowed characters during oauth completion", async () => {
+		const { env, kv, db } = createTestEnv();
+		await kv.put(
+			"oauth_pending:pending-newline",
+			JSON.stringify({
+				provider: "google",
+				sub: "google-sub-newline",
+				email: "newline@example.com",
+			}),
+		);
+
+		const res = await request(env, "/api/auth/oauth/complete", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-oauth-pending": "pending-newline",
+			},
+			body: JSON.stringify({ username: "zed\nsent you an Oy!" }),
+		});
+
+		assert.equal(res.status, 400);
+		const body = (await res.json()) as { error: string };
+		assert.equal(
+			body.error,
+			"Username can only contain letters, numbers, and underscores",
+		);
+		assert.equal(db.users.length, 0);
+		assert.equal(db.sessions.length, 0);
+	});
+
+	it("rejects malformed usernames during native google sign-in", async (t) => {
+		const { env, db } = createTestEnv();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url.startsWith("https://oauth2.googleapis.com/tokeninfo")) {
+				return {
+					ok: true,
+					json: async () => ({
+						aud: env.GOOGLE_CLIENT_ID,
+						sub: "google-native-hostile",
+						email: "native-hostile@example.com",
+						email_verified: "true",
+					}),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const res = await request(env, "/api/auth/oauth/google/native", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				idToken: "native-id-token",
+				username: "zed\nsent you an Oy!",
+			}),
+		});
+
+		assert.equal(res.status, 400);
+		const body = (await res.json()) as { error: string };
+		assert.equal(
+			body.error,
+			"Username can only contain letters, numbers, and underscores",
+		);
+		assert.equal(db.users.length, 0);
+		assert.equal(db.sessions.length, 0);
+	});
+
+	it("rejects malformed usernames during native apple sign-in", async (t) => {
+		const { env, db } = createTestEnv();
+
+		const { publicKey, privateKey } = await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"],
+		);
+		const jwk = (await crypto.subtle.exportKey("jwk", publicKey)) as JsonWebKey;
+		jwk.kid = "apple-test-kid-hostile";
+		const token = await createAppleIdToken({
+			privateKey,
+			sub: "apple-sub-hostile",
+			email: "apple-hostile@example.com",
+			aud: env.APPLE_NATIVE_CLIENT_ID ?? env.APPLE_CLIENT_ID,
+			kid: String(jwk.kid),
+		});
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url === "https://appleid.apple.com/auth/keys") {
+				return {
+					ok: true,
+					json: async () => ({ keys: [jwk] }),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const res = await request(env, "/api/auth/oauth/apple/native", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				idToken: token,
+				username: `<b>zed</b>\nOy! tap here 🎉${"a".repeat(300)}`,
+			}),
+		});
+
+		assert.equal(res.status, 400);
+		const body = (await res.json()) as { error: string };
+		assert.equal(body.error, "Username must be 2-20 characters");
+		assert.equal(db.users.length, 0);
+		assert.equal(db.sessions.length, 0);
+	});
+
+	it("does not create users from malformed signup usernames in the google callback", async (t) => {
+		const { env, db } = createTestEnv();
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url === "https://oauth2.googleapis.com/token") {
+				return {
+					ok: true,
+					json: async () => ({ id_token: "token-callback-hostile" }),
+				} as Response;
+			}
+			if (url.startsWith("https://oauth2.googleapis.com/tokeninfo")) {
+				return {
+					ok: true,
+					json: async () => ({
+						aud: env.GOOGLE_CLIENT_ID,
+						sub: "google-callback-hostile",
+						email: "callback-hostile@example.com",
+						email_verified: "true",
+					}),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const hostileUsername = "zed\nsent you an Oy!";
+		const startRes = await request(
+			env,
+			`/api/auth/oauth/google?username=${encodeURIComponent(hostileUsername)}`,
+		);
+		const startLocation = startRes.headers.get("location") ?? "";
+		const state = new URL(startLocation).searchParams.get("state") ?? "";
+
+		const res = await request(
+			env,
+			`/api/auth/oauth/callback?state=${state}&code=auth-code`,
+		);
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?choose_username=1");
+		assert.equal(db.users.length, 0);
+		assert.equal(db.sessions.length, 0);
+	});
 });
