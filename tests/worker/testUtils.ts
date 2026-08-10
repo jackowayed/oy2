@@ -118,6 +118,33 @@ type UserReportRow = {
 	resolution_note: string | null;
 };
 
+type EmailSendRateRow = {
+	email: string;
+	sends: number;
+	window_started_at: number;
+};
+
+type EmailLoginCodeRow = {
+	email: string;
+	code: string;
+	attempts: number;
+	expires_at: number;
+};
+
+type EmailChangeCodeRow = {
+	user_id: number;
+	target_email: string;
+	code: string;
+	attempts: number;
+	expires_at: number;
+};
+
+type AccountDeleteRateRow = {
+	user_id: number;
+	count: number;
+	expires_at: number;
+};
+
 type D1Result = {
 	success: boolean;
 	meta: { last_row_id: number; changes: number };
@@ -170,6 +197,10 @@ export class FakeD1Database {
 	passkeys: PasskeyRow[] = [];
 	userBlocks: UserBlockRow[] = [];
 	userReports: UserReportRow[] = [];
+	emailSendRate: EmailSendRateRow[] = [];
+	emailLoginCodes: EmailLoginCodeRow[] = [];
+	emailChangeCodes: EmailChangeCodeRow[] = [];
+	accountDeleteRate: AccountDeleteRateRow[] = [];
 	nextUserId = 1;
 	nextOyId = 1;
 	nextNotificationId = 1;
@@ -359,9 +390,24 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 		}
 		if (sql.startsWith("DELETE FROM users WHERE id = ?")) {
 			const [userId] = this.params as [number];
+			const deletedEmail =
+				this.db.users.find((row) => row.id === userId)?.email?.toLowerCase() ??
+				null;
 			const before = this.db.users.length;
 			this.db.users = this.db.users.filter((row) => row.id !== userId);
 			this.db.sessions = this.db.sessions.filter((row) => row.user_id !== userId);
+			this.db.emailChangeCodes = this.db.emailChangeCodes.filter(
+				(row) => row.user_id !== userId,
+			);
+			if (deletedEmail !== null) {
+				this.db.emailLoginCodes = this.db.emailLoginCodes.filter(
+					(row) => row.email.toLowerCase() !== deletedEmail,
+				);
+				this.db.emailSendRate = this.db.emailSendRate.filter(
+					(row) => row.email.toLowerCase() !== deletedEmail,
+				);
+			}
+			// accountDeleteRate deliberately survives the user delete (no FK).
 			this.db.passkeys = this.db.passkeys.filter((row) => row.user_id !== userId);
 			this.db.friendships = this.db.friendships.filter(
 				(row) => row.user_id !== userId && row.friend_id !== userId,
@@ -896,6 +942,34 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 				meta: {
 					last_row_id: 0,
 					changes: before - this.db.passkeys.length,
+				},
+			};
+		}
+		if (sql.startsWith("DELETE FROM email_login_codes WHERE email = ?")) {
+			const [email] = this.params as [string];
+			const before = this.db.emailLoginCodes.length;
+			this.db.emailLoginCodes = this.db.emailLoginCodes.filter(
+				(row) => row.email !== email,
+			);
+			return {
+				success: true,
+				meta: {
+					last_row_id: 0,
+					changes: before - this.db.emailLoginCodes.length,
+				},
+			};
+		}
+		if (sql.startsWith("DELETE FROM email_change_codes WHERE user_id = ?")) {
+			const [userId] = this.params as [number];
+			const before = this.db.emailChangeCodes.length;
+			this.db.emailChangeCodes = this.db.emailChangeCodes.filter(
+				(row) => row.user_id !== userId,
+			);
+			return {
+				success: true,
+				meta: {
+					last_row_id: 0,
+					changes: before - this.db.emailChangeCodes.length,
 				},
 			};
 		}
@@ -1682,6 +1756,147 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 
 	async first() {
 		const sql = normalizeSql(this.sql);
+		// Atomic email/account rate-limit statements (INSERT ... ON CONFLICT ...
+		// RETURNING and UPDATE ... RETURNING). Each mirrors the CASE/WHERE logic of
+		// the real SQL so the fake spends the same budget the DB would.
+		if (sql.startsWith("INSERT INTO email_send_rate")) {
+			const [email, now, windowThreshold] = this.params as [
+				string,
+				number,
+				number,
+			];
+			const existing = this.db.emailSendRate.find((row) => row.email === email);
+			if (!existing) {
+				const row: EmailSendRateRow = {
+					email,
+					sends: 1,
+					window_started_at: now,
+				};
+				this.db.emailSendRate.push(row);
+				return { sends: row.sends };
+			}
+			const active = existing.window_started_at > windowThreshold;
+			existing.sends = active ? existing.sends + 1 : 1;
+			existing.window_started_at = active ? existing.window_started_at : now;
+			return { sends: existing.sends };
+		}
+		if (sql.startsWith("INSERT INTO email_login_codes")) {
+			const [email, code, expiresAt, now, maxAttempts] = this.params as [
+				string,
+				string,
+				number,
+				number,
+				number,
+			];
+			const existing = this.db.emailLoginCodes.find(
+				(row) => row.email === email,
+			);
+			if (!existing) {
+				const row: EmailLoginCodeRow = {
+					email,
+					code,
+					attempts: 0,
+					expires_at: expiresAt,
+				};
+				this.db.emailLoginCodes.push(row);
+				return { code: row.code };
+			}
+			const reuse = existing.expires_at > now && existing.attempts < maxAttempts;
+			if (!reuse) {
+				existing.code = code;
+				existing.attempts = 0;
+				existing.expires_at = expiresAt;
+			}
+			return { code: existing.code };
+		}
+		if (sql.startsWith("UPDATE email_login_codes")) {
+			const [email, maxAttempts, now] = this.params as [
+				string,
+				number,
+				number,
+			];
+			const row = this.db.emailLoginCodes.find(
+				(item) =>
+					item.email === email &&
+					item.attempts < maxAttempts &&
+					item.expires_at > now,
+			);
+			if (!row) {
+				return null;
+			}
+			row.attempts += 1;
+			return { code: row.code };
+		}
+		if (sql.startsWith("INSERT INTO email_change_codes")) {
+			const [userId, targetEmail, code, expiresAt, now, maxAttempts] = this
+				.params as [number, string, string, number, number, number];
+			const existing = this.db.emailChangeCodes.find(
+				(row) => row.user_id === userId,
+			);
+			if (!existing) {
+				const row: EmailChangeCodeRow = {
+					user_id: userId,
+					target_email: targetEmail,
+					code,
+					attempts: 0,
+					expires_at: expiresAt,
+				};
+				this.db.emailChangeCodes.push(row);
+				return { code: row.code };
+			}
+			const reuse =
+				existing.expires_at > now &&
+				existing.attempts < maxAttempts &&
+				existing.target_email === targetEmail;
+			if (!reuse) {
+				existing.code = code;
+				existing.attempts = 0;
+				existing.target_email = targetEmail;
+				existing.expires_at = expiresAt;
+			}
+			return { code: existing.code };
+		}
+		if (sql.startsWith("UPDATE email_change_codes")) {
+			const [userId, maxAttempts, now] = this.params as [
+				number,
+				number,
+				number,
+			];
+			const row = this.db.emailChangeCodes.find(
+				(item) =>
+					item.user_id === userId &&
+					item.attempts < maxAttempts &&
+					item.expires_at > now,
+			);
+			if (!row) {
+				return null;
+			}
+			row.attempts += 1;
+			return { target_email: row.target_email, code: row.code };
+		}
+		if (sql.startsWith("INSERT INTO account_delete_rate")) {
+			const [userId, expiresAt, now] = this.params as [
+				number,
+				number,
+				number,
+			];
+			const existing = this.db.accountDeleteRate.find(
+				(row) => row.user_id === userId,
+			);
+			if (!existing) {
+				const row: AccountDeleteRateRow = {
+					user_id: userId,
+					count: 1,
+					expires_at: expiresAt,
+				};
+				this.db.accountDeleteRate.push(row);
+				return { count: row.count };
+			}
+			const active = existing.expires_at > now;
+			existing.count = active ? existing.count + 1 : 1;
+			existing.expires_at = active ? existing.expires_at : expiresAt;
+			return { count: existing.count };
+		}
 		// Handle INSERT ... RETURNING * for PostgreSQL
 		if (
 			sql.startsWith(
@@ -2116,6 +2331,72 @@ export function seedSession(db: FakeD1Database, userId: number, token: string) {
 		token,
 		user_id: userId,
 		created_at: nowSeconds(),
+	});
+}
+
+export function seedEmailLoginCode(
+	db: FakeD1Database,
+	{
+		email,
+		code,
+		attempts = 0,
+		expiresAt = nowSeconds() + 600,
+	}: {
+		email: string;
+		code: string;
+		attempts?: number;
+		expiresAt?: number;
+	},
+) {
+	db.emailLoginCodes.push({
+		email,
+		code,
+		attempts,
+		expires_at: expiresAt,
+	});
+}
+
+export function seedEmailChangeCode(
+	db: FakeD1Database,
+	{
+		userId,
+		targetEmail,
+		code,
+		attempts = 0,
+		expiresAt = nowSeconds() + 600,
+	}: {
+		userId: number;
+		targetEmail: string;
+		code: string;
+		attempts?: number;
+		expiresAt?: number;
+	},
+) {
+	db.emailChangeCodes.push({
+		user_id: userId,
+		target_email: targetEmail,
+		code,
+		attempts,
+		expires_at: expiresAt,
+	});
+}
+
+export function seedEmailSendRate(
+	db: FakeD1Database,
+	{
+		email,
+		sends,
+		windowStartedAt = nowSeconds(),
+	}: {
+		email: string;
+		sends: number;
+		windowStartedAt?: number;
+	},
+) {
+	db.emailSendRate.push({
+		email,
+		sends,
+		window_started_at: windowStartedAt,
 	});
 }
 

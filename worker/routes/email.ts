@@ -8,28 +8,16 @@ import {
 import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
-const EMAIL_CODE_PREFIX = "email_code:";
-const EMAIL_RATE_PREFIX = "email_rate:";
 const EMAIL_PENDING_PREFIX = "email_pending:";
-const EMAIL_ADD_PREFIX = "email_add:";
+const RATE_WINDOW_SECONDS = 60;
+const CODE_TTL_SECONDS = 600;
+const MAX_CODE_ATTEMPTS = 5;
+const MAX_SENDS_PER_WINDOW = 3;
 const DEMO_ACCOUNTS = {
 	"demo1@example.com": "demo1_appstore",
 	"demo2@example.com": "demo2_appstore",
 	"demo3@example.com": "demo3_appstore",
 } as const;
-
-type EmailCodeData = {
-	code: string;
-	attempts: number;
-};
-type EmailRateData = {
-	count: number;
-};
-type EmailAddData = {
-	email: string;
-	code: string;
-	attempts: number;
-};
 
 function generateVerificationCode(): string {
 	const array = new Uint8Array(4);
@@ -143,13 +131,21 @@ export function registerEmailRoutes(app: App) {
 			return c.json({ status: "code_sent" });
 		}
 
-		// Check rate limit (max 3 codes per email per minute)
-		const rateKey = `${EMAIL_RATE_PREFIX}${email}`;
-		const rateDataRaw = await c.env.OY2.get(rateKey);
-		const rateData = rateDataRaw
-			? (JSON.parse(rateDataRaw) as EmailRateData)
-			: { count: 0 };
-		if (rateData.count >= 3) {
+		const now = Math.floor(Date.now() / 1000);
+
+		// Atomic send-rate limit (max MAX_SENDS_PER_WINDOW codes per email per window).
+		const rate = await c.get("db").query<{ sends: number }>(
+			`INSERT INTO email_send_rate (email, sends, window_started_at)
+			 VALUES ($1, 1, $2)
+			 ON CONFLICT (email) DO UPDATE SET
+			   sends = CASE WHEN email_send_rate.window_started_at > $3
+			                THEN email_send_rate.sends + 1 ELSE 1 END,
+			   window_started_at = CASE WHEN email_send_rate.window_started_at > $3
+			                            THEN email_send_rate.window_started_at ELSE $2 END
+			 RETURNING sends`,
+			[email, now, now - RATE_WINDOW_SECONDS],
+		);
+		if (rate.rows[0].sends > MAX_SENDS_PER_WINDOW) {
 			return c.json(
 				{
 					error:
@@ -158,33 +154,33 @@ export function registerEmailRoutes(app: App) {
 				429,
 			);
 		}
-		await c.env.OY2.put(
-			rateKey,
-			JSON.stringify({ count: rateData.count + 1 }),
-			{ expirationTtl: 60 },
+
+		// Reserve/reuse a code atomically without resetting attempts on reuse.
+		const reserved = await c.get("db").query<{ code: string }>(
+			`INSERT INTO email_login_codes (email, code, attempts, expires_at)
+			 VALUES ($1, $2, 0, $3)
+			 ON CONFLICT (email) DO UPDATE SET
+			   code       = CASE WHEN email_login_codes.expires_at > $4 AND email_login_codes.attempts < $5
+			                     THEN email_login_codes.code ELSE EXCLUDED.code END,
+			   attempts   = CASE WHEN email_login_codes.expires_at > $4 AND email_login_codes.attempts < $5
+			                     THEN email_login_codes.attempts ELSE 0 END,
+			   expires_at = CASE WHEN email_login_codes.expires_at > $4 AND email_login_codes.attempts < $5
+			                     THEN email_login_codes.expires_at ELSE EXCLUDED.expires_at END
+			 RETURNING code`,
+			[
+				email,
+				generateVerificationCode(),
+				now + CODE_TTL_SECONDS,
+				now,
+				MAX_CODE_ATTEMPTS,
+			],
 		);
 
-		// Reuse an unexpired code so duplicate emails do not contain conflicting codes.
-		const codeKey = `${EMAIL_CODE_PREFIX}${email}`;
-		const existingCodeRaw = await c.env.OY2.get(codeKey);
-		const existingCode = existingCodeRaw
-			? (JSON.parse(existingCodeRaw) as EmailCodeData)
-			: null;
-		const reusableCode =
-			existingCode && existingCode.attempts < 5 ? existingCode : null;
-		const code = reusableCode?.code ?? generateVerificationCode();
-		await c.env.OY2.put(
-			codeKey,
-			JSON.stringify({ code, attempts: reusableCode?.attempts ?? 0 }),
-			{ expirationTtl: 600 },
-		);
-
-		const result = await sendEmailCode(c, { email, code });
+		const result = await sendEmailCode(c, {
+			email,
+			code: reserved.rows[0].code,
+		});
 		if (!result.success) {
-			// Clean up newly generated codes if email delivery failed.
-			if (!reusableCode) {
-				await c.env.OY2.delete(codeKey);
-			}
 			return c.json({ error: result.error || "Failed to send email" }, 500);
 		}
 
@@ -208,41 +204,34 @@ export function registerEmailRoutes(app: App) {
 		}
 
 		if (!isDemoEmail(email)) {
-			// Get stored code
-			const storedData = await c.env.OY2.get(`${EMAIL_CODE_PREFIX}${email}`);
-			if (!storedData) {
+			const now = Math.floor(Date.now() / 1000);
+			// Atomically spend one attempt against a live code.
+			const claim = await c.get("db").query<{ code: string }>(
+				`UPDATE email_login_codes
+				    SET attempts = attempts + 1
+				  WHERE email = $1 AND attempts < $2 AND expires_at > $3
+				 RETURNING code`,
+				[email, MAX_CODE_ATTEMPTS, now],
+			);
+			if (!claim.rows[0]) {
 				return c.json(
 					{ error: "Code expired or not found. Please request a new code." },
 					400,
 				);
 			}
 
-			const data = JSON.parse(storedData) as EmailCodeData;
-
-			// Check attempts (max 5)
-			if (data.attempts >= 5) {
-				await c.env.OY2.delete(`${EMAIL_CODE_PREFIX}${email}`);
-				return c.json(
-					{ error: "Too many failed attempts. Please request a new code." },
-					400,
-				);
-			}
-
 			// Verify code (constant-time comparison)
-			const codeMatches = timingSafeEqualString(code, data.code);
-
-			if (!codeMatches) {
-				// Increment attempts
-				await c.env.OY2.put(
-					`${EMAIL_CODE_PREFIX}${email}`,
-					JSON.stringify({ ...data, attempts: data.attempts + 1 }),
-					{ expirationTtl: 600 },
-				);
+			if (!timingSafeEqualString(code, claim.rows[0].code)) {
 				return c.json({ error: "Invalid code" }, 400);
 			}
 
-			// Code is valid - delete it
-			await c.env.OY2.delete(`${EMAIL_CODE_PREFIX}${email}`);
+			// Code is valid - consume it (single-use).
+			const consumed = await c
+				.get("db")
+				.query("DELETE FROM email_login_codes WHERE email = $1", [email]);
+			if (consumed.rowCount === 0) {
+				return c.json({ error: "Invalid code" }, 400);
+			}
 		}
 
 		// Check if user exists with this email
@@ -459,13 +448,21 @@ export function registerEmailRoutes(app: App) {
 			return c.json({ error: "Email already in use" }, 400);
 		}
 
-		// Check rate limit (max 3 codes per email per minute)
-		const rateKey = `${EMAIL_RATE_PREFIX}${email}`;
-		const rateDataRaw = await c.env.OY2.get(rateKey);
-		const rateData = rateDataRaw
-			? (JSON.parse(rateDataRaw) as EmailRateData)
-			: { count: 0 };
-		if (rateData.count >= 3) {
+		const now = Math.floor(Date.now() / 1000);
+
+		// Atomic send-rate limit, keyed by the target email (shared with login send-code).
+		const rate = await c.get("db").query<{ sends: number }>(
+			`INSERT INTO email_send_rate (email, sends, window_started_at)
+			 VALUES ($1, 1, $2)
+			 ON CONFLICT (email) DO UPDATE SET
+			   sends = CASE WHEN email_send_rate.window_started_at > $3
+			                THEN email_send_rate.sends + 1 ELSE 1 END,
+			   window_started_at = CASE WHEN email_send_rate.window_started_at > $3
+			                            THEN email_send_rate.window_started_at ELSE $2 END
+			 RETURNING sends`,
+			[email, now, now - RATE_WINDOW_SECONDS],
+		);
+		if (rate.rows[0].sends > MAX_SENDS_PER_WINDOW) {
 			return c.json(
 				{
 					error:
@@ -474,33 +471,38 @@ export function registerEmailRoutes(app: App) {
 				429,
 			);
 		}
-		await c.env.OY2.put(
-			rateKey,
-			JSON.stringify({ count: rateData.count + 1 }),
-			{ expirationTtl: 60 },
+
+		// Reserve/reuse a change-email code atomically without resetting attempts on
+		// reuse; regenerate (and refresh target_email) when there is no live code for
+		// this target.
+		const reserved = await c.get("db").query<{ code: string }>(
+			`INSERT INTO email_change_codes (user_id, target_email, code, attempts, expires_at)
+			 VALUES ($1, $2, $3, 0, $4)
+			 ON CONFLICT (user_id) DO UPDATE SET
+			   code         = CASE WHEN email_change_codes.expires_at > $5 AND email_change_codes.attempts < $6 AND email_change_codes.target_email = EXCLUDED.target_email
+			                       THEN email_change_codes.code ELSE EXCLUDED.code END,
+			   attempts     = CASE WHEN email_change_codes.expires_at > $5 AND email_change_codes.attempts < $6 AND email_change_codes.target_email = EXCLUDED.target_email
+			                       THEN email_change_codes.attempts ELSE 0 END,
+			   target_email = CASE WHEN email_change_codes.expires_at > $5 AND email_change_codes.attempts < $6 AND email_change_codes.target_email = EXCLUDED.target_email
+			                       THEN email_change_codes.target_email ELSE EXCLUDED.target_email END,
+			   expires_at   = CASE WHEN email_change_codes.expires_at > $5 AND email_change_codes.attempts < $6 AND email_change_codes.target_email = EXCLUDED.target_email
+			                       THEN email_change_codes.expires_at ELSE EXCLUDED.expires_at END
+			 RETURNING code`,
+			[
+				user.id,
+				email,
+				generateVerificationCode(),
+				now + CODE_TTL_SECONDS,
+				now,
+				MAX_CODE_ATTEMPTS,
+			],
 		);
 
-		const addCodeKey = `${EMAIL_ADD_PREFIX}${user.id}`;
-		const existingAddCodeRaw = await c.env.OY2.get(addCodeKey);
-		const existingAddCode = existingAddCodeRaw
-			? (JSON.parse(existingAddCodeRaw) as EmailAddData)
-			: null;
-		const reusableAddCode =
-			existingAddCode?.email === email && existingAddCode.attempts < 5
-				? existingAddCode
-				: null;
-		const code = reusableAddCode?.code ?? generateVerificationCode();
-		await c.env.OY2.put(
-			addCodeKey,
-			JSON.stringify({ email, code, attempts: reusableAddCode?.attempts ?? 0 }),
-			{ expirationTtl: 600 },
-		);
-
-		const result = await sendEmailCode(c, { email, code });
+		const result = await sendEmailCode(c, {
+			email,
+			code: reserved.rows[0].code,
+		});
 		if (!result.success) {
-			if (!reusableAddCode) {
-				await c.env.OY2.delete(addCodeKey);
-			}
 			return c.json({ error: result.error || "Failed to send email" }, 500);
 		}
 
@@ -520,37 +522,44 @@ export function registerEmailRoutes(app: App) {
 			return c.json({ error: "Code is required" }, 400);
 		}
 
-		const storedData = await c.env.OY2.get(`${EMAIL_ADD_PREFIX}${user.id}`);
-		if (!storedData) {
+		const now = Math.floor(Date.now() / 1000);
+		// Atomically spend one attempt against a live change-email code.
+		const claim = await c
+			.get("db")
+			.query<{ target_email: string; code: string }>(
+				`UPDATE email_change_codes
+			    SET attempts = attempts + 1
+			  WHERE user_id = $1 AND attempts < $2 AND expires_at > $3
+			 RETURNING target_email, code`,
+				[user.id, MAX_CODE_ATTEMPTS, now],
+			);
+		if (!claim.rows[0]) {
 			return c.json(
 				{ error: "Code expired or not found. Please request a new code." },
 				400,
 			);
 		}
 
-		const data = JSON.parse(storedData) as EmailAddData;
-
-		if (data.attempts >= 5) {
-			await c.env.OY2.delete(`${EMAIL_ADD_PREFIX}${user.id}`);
-			return c.json(
-				{ error: "Too many failed attempts. Please request a new code." },
-				400,
-			);
-		}
-
-		const codeMatches = timingSafeEqualString(code, data.code);
-		if (!codeMatches) {
-			await c.env.OY2.put(
-				`${EMAIL_ADD_PREFIX}${user.id}`,
-				JSON.stringify({ ...data, attempts: data.attempts + 1 }),
-				{ expirationTtl: 600 },
-			);
+		if (!timingSafeEqualString(code, claim.rows[0].code)) {
 			return c.json({ error: "Invalid code" }, 400);
 		}
 
+		// Code is valid - consume it (single-use).
+		const consumed = await c
+			.get("db")
+			.query("DELETE FROM email_change_codes WHERE user_id = $1", [user.id]);
+		if (consumed.rowCount === 0) {
+			return c.json({ error: "Invalid code" }, 400);
+		}
+
+		// Trust the server-stored target, never the client, for which email to bind.
+		const targetEmail = claim.rows[0].target_email;
+
 		const existingUser = await c
 			.get("db")
-			.query<User>("SELECT * FROM users WHERE LOWER(email) = $1", [data.email]);
+			.query<User>("SELECT * FROM users WHERE LOWER(email) = $1", [
+				targetEmail,
+			]);
 		if (existingUser.rows[0] && existingUser.rows[0].id !== user.id) {
 			return c.json({ error: "Email already in use" }, 400);
 		}
@@ -558,12 +567,11 @@ export function registerEmailRoutes(app: App) {
 		await c
 			.get("db")
 			.query("UPDATE users SET email = $1 WHERE id = $2", [
-				data.email,
+				targetEmail,
 				user.id,
 			]);
-		await c.env.OY2.delete(`${EMAIL_ADD_PREFIX}${user.id}`);
 
-		return c.json({ status: "email_updated", email: data.email });
+		return c.json({ status: "email_updated", email: targetEmail });
 	});
 
 	// Get pending email info (for username selection screen)

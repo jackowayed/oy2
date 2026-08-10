@@ -142,6 +142,33 @@ describe("auth", () => {
 		assert.equal(db.users.find((row) => row.id === user.id), undefined);
 	});
 
+	it("rate limits repeated account deletion attempts", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "DeleteSpammer" });
+		const statuses: number[] = [];
+		for (let i = 0; i < 4; i += 1) {
+			// The delete removes the account + session, but account_delete_rate
+			// (keyed by user id, no FK) survives and keeps counting. Re-establish
+			// the account/session each round so all four calls are authenticated
+			// with the same user id.
+			if (!db.users.some((row) => row.id === user.id)) {
+				db.users.push(user);
+			}
+			if (!db.sessions.some((row) => row.token === "delete-spam-token")) {
+				seedSession(db, user.id, "delete-spam-token");
+			}
+			const { res } = await jsonRequest(env, "/api/auth/account", {
+				method: "DELETE",
+				headers: { "x-session-token": "delete-spam-token" },
+			});
+			statuses.push(res.status);
+		}
+
+		assert.deepEqual(statuses, [200, 200, 200, 429]);
+		// The 4th attempt is blocked before the delete runs, so the account remains.
+		assert.ok(db.users.some((row) => row.id === user.id));
+	});
+
 	it("rejects unauthenticated account deletion", async () => {
 		const { env } = createTestEnv();
 		const { res, json } = await jsonRequest(env, "/api/auth/account", {

@@ -3,13 +3,8 @@ import { authUserPayload, validateUsername } from "../lib";
 import { validateCleanUsername } from "../moderation";
 import type { App, AppContext, User } from "../types";
 
-const DELETE_RATE_PREFIX = "account_delete_rate:";
 const DELETE_RATE_TTL_SECONDS = 60 * 60;
 const DELETE_RATE_LIMIT_MAX = 3;
-
-type DeleteRateData = {
-	count: number;
-};
 
 function clearSessionCookie(c: AppContext) {
 	deleteCookie(c, "session", { path: "/" });
@@ -100,12 +95,19 @@ export function registerAuthRoutes(app: App) {
 			return c.json({ error: "Not authenticated" }, 401);
 		}
 
-		const rateKey = `${DELETE_RATE_PREFIX}${user.id}`;
-		const rateDataRaw = await c.env.OY2.get(rateKey);
-		const rateData = rateDataRaw
-			? (JSON.parse(rateDataRaw) as DeleteRateData)
-			: { count: 0 };
-		if (rateData.count >= DELETE_RATE_LIMIT_MAX) {
+		const now = Math.floor(Date.now() / 1000);
+		const rate = await c.get("db").query<{ count: number }>(
+			`INSERT INTO account_delete_rate (user_id, count, expires_at)
+			 VALUES ($1, 1, $2)
+			 ON CONFLICT (user_id) DO UPDATE SET
+			   count      = CASE WHEN account_delete_rate.expires_at > $3
+			                     THEN account_delete_rate.count + 1 ELSE 1 END,
+			   expires_at = CASE WHEN account_delete_rate.expires_at > $3
+			                     THEN account_delete_rate.expires_at ELSE $2 END
+			 RETURNING count`,
+			[user.id, now + DELETE_RATE_TTL_SECONDS, now],
+		);
+		if (rate.rows[0].count > DELETE_RATE_LIMIT_MAX) {
 			return c.json(
 				{
 					error: "Too many account deletion attempts. Please try again later.",
@@ -113,12 +115,6 @@ export function registerAuthRoutes(app: App) {
 				429,
 			);
 		}
-
-		await c.env.OY2.put(
-			rateKey,
-			JSON.stringify({ count: rateData.count + 1 }),
-			{ expirationTtl: DELETE_RATE_TTL_SECONDS },
-		);
 
 		await c.get("db").query("DELETE FROM users WHERE id = $1", [user.id]);
 		clearSessionCookie(c);
