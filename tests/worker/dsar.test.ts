@@ -71,4 +71,43 @@ describe("dsar", () => {
 		assert.deepEqual(emailPayload?.to, ["contact@oyme.site"]);
 		assert.match(String(emailPayload?.subject), /DSAR delete request/);
 	});
+
+	it("escapes user-controlled HTML in the staff email body", async (t) => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "DsarUser", email: "u@example.com" });
+		seedSession(db, user.id, "dsar-token");
+
+		let emailPayload: Record<string, unknown> | null = null;
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (_input, init) => {
+			if (init?.body && typeof init.body === "string") {
+				emailPayload = JSON.parse(init.body) as Record<string, unknown>;
+			}
+			return { ok: true, json: async () => ({ id: "email_123" }) } as Response;
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const { res, json } = await jsonRequest(env, "/api/dsar", {
+			method: "POST",
+			headers: { "x-session-token": "dsar-token" },
+			body: {
+				requestType: "access",
+				jurisdiction: "<img src=x onerror=alert(1)>",
+				details: "<script>alert(1)</script>",
+			},
+		});
+
+		assert.equal(res.status, 200);
+		assert.equal(json.success, true);
+		assert.ok(emailPayload);
+		const html = String(emailPayload?.html);
+		// Escaped forms are present.
+		assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+		assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
+		// Raw markup is not.
+		assert.ok(!html.includes("<script>"));
+		assert.ok(!html.includes("<img "));
+	});
 });

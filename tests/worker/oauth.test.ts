@@ -17,12 +17,14 @@ async function createAppleIdToken({
 	privateKey,
 	sub,
 	email,
+	emailVerified,
 	aud,
 	kid,
 }: {
 	privateKey: CryptoKey;
 	sub: string;
 	email?: string;
+	emailVerified?: boolean | string;
 	aud: string;
 	kid: string;
 }): Promise<string> {
@@ -34,6 +36,7 @@ async function createAppleIdToken({
 			aud,
 			sub,
 			email,
+			email_verified: emailVerified,
 			exp: now + 3600,
 			iat: now,
 		}),
@@ -724,5 +727,122 @@ describe("oauth", () => {
 		assert.equal(db.sessions[0].user_id, user.id);
 		// Matching state is consumed from KV on success.
 		assert.equal(await kv.get(`oauth_state:${state}`), null);
+	});
+
+	it("does not link an existing account when apple email is unverified", async (t) => {
+		const { env, db } = createTestEnv();
+		const existing = seedUser(db, {
+			username: "AppleEmailVictim",
+			email: "shared-apple@example.com",
+		});
+
+		const { publicKey, privateKey } = await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"],
+		);
+		const jwk = (await crypto.subtle.exportKey("jwk", publicKey)) as JsonWebKey;
+		jwk.kid = "apple-unverified-kid";
+		const token = await createAppleIdToken({
+			privateKey,
+			sub: "apple-unverified-sub",
+			email: "shared-apple@example.com",
+			emailVerified: false,
+			aud: env.APPLE_NATIVE_CLIENT_ID ?? env.APPLE_CLIENT_ID,
+			kid: String(jwk.kid),
+		});
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url === "https://appleid.apple.com/auth/keys") {
+				return {
+					ok: true,
+					json: async () => ({ keys: [jwk] }),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const res = await request(env, "/api/auth/oauth/apple/native", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ idToken: token }),
+		});
+
+		assert.equal(res.status, 200);
+		const body = (await res.json()) as { needsUsername?: boolean };
+		// Unverified email must go down the new-user path, not adopt the account.
+		assert.equal(body.needsUsername, true);
+		assert.equal(existing.oauth_provider, null);
+		assert.equal(existing.oauth_sub, null);
+		assert.equal(db.sessions.length, 0);
+	});
+
+	it("links an existing account when apple email is verified", async (t) => {
+		const { env, db } = createTestEnv();
+		const existing = seedUser(db, {
+			username: "AppleEmailOwner",
+			email: "verified-apple@example.com",
+		});
+
+		const { publicKey, privateKey } = await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"],
+		);
+		const jwk = (await crypto.subtle.exportKey("jwk", publicKey)) as JsonWebKey;
+		jwk.kid = "apple-verified-kid";
+		const token = await createAppleIdToken({
+			privateKey,
+			sub: "apple-verified-sub",
+			email: "verified-apple@example.com",
+			emailVerified: true,
+			aud: env.APPLE_NATIVE_CLIENT_ID ?? env.APPLE_CLIENT_ID,
+			kid: String(jwk.kid),
+		});
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url === "https://appleid.apple.com/auth/keys") {
+				return {
+					ok: true,
+					json: async () => ({ keys: [jwk] }),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const res = await request(env, "/api/auth/oauth/apple/native", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ idToken: token }),
+		});
+
+		assert.equal(res.status, 200);
+		const body = (await res.json()) as { needsPasskeySetup?: boolean };
+		// Verified email links to and adopts the existing account.
+		assert.equal(body.needsPasskeySetup, true);
+		assert.equal(existing.oauth_provider, "apple");
+		assert.equal(existing.oauth_sub, "apple-verified-sub");
+		assert.equal(db.sessions.length, 1);
+		assert.equal(db.sessions[0].user_id, existing.id);
 	});
 });

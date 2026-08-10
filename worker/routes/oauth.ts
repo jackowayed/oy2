@@ -126,6 +126,7 @@ async function verifyAppleIdToken(
 			exp?: number;
 			sub?: string;
 			email?: string;
+			email_verified?: boolean | string;
 			aud?: string | string[];
 		};
 
@@ -213,7 +214,12 @@ async function verifyAppleIdToken(
 			return null;
 		}
 
-		return { sub: payload.sub, email: payload.email };
+		const emailVerified =
+			payload.email_verified === true || payload.email_verified === "true";
+		return {
+			sub: payload.sub,
+			email: emailVerified ? payload.email : undefined,
+		};
 	} catch {
 		return null;
 	}
