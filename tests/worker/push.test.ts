@@ -54,17 +54,15 @@ describe("push subscriptions", () => {
 		assert.equal(db.pushSubscriptions.length, 0);
 	});
 
-	it("updates existing endpoint subscriptions", async () => {
+	it("re-subscribing to the same endpoint as the same user updates keys", async () => {
 		const { env, db } = createTestEnv();
-		const firstUser = seedUser(db, { username: "Pushy" });
-		const secondUser = seedUser(db, { username: "Pushier" });
-		seedSession(db, firstUser.id, "first-push-token");
-		seedSession(db, secondUser.id, "second-push-token");
+		const victim = seedUser(db, { username: "Pushy" });
+		seedSession(db, victim.id, "victim-push-token");
 
 		const endpoint = "https://example.com/same-endpoint";
 		await jsonRequest(env, "/api/push/subscribe", {
 			method: "POST",
-			headers: { "x-session-token": "first-push-token" },
+			headers: { "x-session-token": "victim-push-token" },
 			body: {
 				endpoint,
 				keys: { p256dh: "old-p256", auth: "old-auth" },
@@ -72,7 +70,7 @@ describe("push subscriptions", () => {
 		});
 		const { res, json } = await jsonRequest(env, "/api/push/subscribe", {
 			method: "POST",
-			headers: { "x-session-token": "second-push-token" },
+			headers: { "x-session-token": "victim-push-token" },
 			body: {
 				endpoint,
 				keys: { p256dh: "new-p256", auth: "new-auth" },
@@ -82,9 +80,115 @@ describe("push subscriptions", () => {
 		assert.equal(res.status, 200);
 		assert.equal(json.success, true);
 		assert.equal(db.pushSubscriptions.length, 1);
-		assert.equal(db.pushSubscriptions[0]?.user_id, secondUser.id);
+		assert.equal(db.pushSubscriptions[0]?.user_id, victim.id);
 		assert.equal(db.pushSubscriptions[0]?.keys_p256dh, "new-p256");
 		assert.equal(db.pushSubscriptions[0]?.keys_auth, "new-auth");
+	});
+
+	it("blocks web subscription hijack of another user's endpoint", async () => {
+		const { env, db } = createTestEnv();
+		const victim = seedUser(db, { username: "Victim" });
+		const attacker = seedUser(db, { username: "Attacker" });
+		seedSession(db, victim.id, "victim-push-token");
+		seedSession(db, attacker.id, "attacker-push-token");
+
+		const endpoint = "https://example.com/victim-endpoint";
+		await jsonRequest(env, "/api/push/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "victim-push-token" },
+			body: {
+				endpoint,
+				keys: { p256dh: "victim-p256", auth: "victim-auth" },
+			},
+		});
+
+		const { res, json } = await jsonRequest(env, "/api/push/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "attacker-push-token" },
+			body: {
+				endpoint,
+				keys: { p256dh: "attacker-p256", auth: "attacker-auth" },
+			},
+		});
+
+		// Response gives nothing away: the block looks like an ordinary success.
+		assert.equal(res.status, 200);
+		assert.equal(json.success, true);
+
+		// The victim's row is left completely untouched.
+		assert.equal(db.pushSubscriptions.length, 1);
+		const row = db.pushSubscriptions.find((sub) => sub.endpoint === endpoint);
+		assert.equal(row?.user_id, victim.id);
+		assert.equal(row?.keys_p256dh, "victim-p256");
+		assert.equal(row?.keys_auth, "victim-auth");
+	});
+
+	it("blocks native subscription hijack of another user's token", async () => {
+		const { env, db } = createTestEnv();
+		const victim = seedUser(db, { username: "NativeVictim" });
+		const attacker = seedUser(db, { username: "NativeAttacker" });
+		seedSession(db, victim.id, "victim-native-token");
+		seedSession(db, attacker.id, "attacker-native-token");
+
+		const token = "shared-native-token";
+		await jsonRequest(env, "/api/push/native/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "victim-native-token" },
+			body: { token, platform: "ios", apnsEnvironment: "sandbox" },
+		});
+
+		const { res, json } = await jsonRequest(env, "/api/push/native/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "attacker-native-token" },
+			body: { token, platform: "android" },
+		});
+
+		// Response gives nothing away: the block looks like an ordinary success.
+		assert.equal(res.status, 200);
+		assert.equal(json.success, true);
+
+		// The victim's row is left completely untouched.
+		assert.equal(db.pushSubscriptions.length, 1);
+		const row = db.pushSubscriptions.find((sub) => sub.native_token === token);
+		assert.equal(row?.user_id, victim.id);
+		assert.equal(row?.platform, "ios");
+		assert.equal(row?.apns_environment, "sandbox");
+	});
+
+	it("inserts a fresh endpoint for the subscribing user", async () => {
+		const { env, db } = createTestEnv();
+		const victim = seedUser(db, { username: "Victim" });
+		const attacker = seedUser(db, { username: "Attacker" });
+		seedSession(db, victim.id, "victim-push-token");
+		seedSession(db, attacker.id, "attacker-push-token");
+
+		await jsonRequest(env, "/api/push/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "victim-push-token" },
+			body: {
+				endpoint: "https://example.com/victim-endpoint",
+				keys: { p256dh: "victim-p256", auth: "victim-auth" },
+			},
+		});
+
+		const attackerEndpoint = "https://example.com/attacker-endpoint";
+		const { res, json } = await jsonRequest(env, "/api/push/subscribe", {
+			method: "POST",
+			headers: { "x-session-token": "attacker-push-token" },
+			body: {
+				endpoint: attackerEndpoint,
+				keys: { p256dh: "attacker-p256", auth: "attacker-auth" },
+			},
+		});
+
+		assert.equal(res.status, 200);
+		assert.equal(json.success, true);
+		assert.equal(db.pushSubscriptions.length, 2);
+		const row = db.pushSubscriptions.find(
+			(sub) => sub.endpoint === attackerEndpoint,
+		);
+		assert.equal(row?.user_id, attacker.id);
+		assert.equal(row?.keys_p256dh, "attacker-p256");
 	});
 
 	it("subscribes and unsubscribes native tokens", async () => {

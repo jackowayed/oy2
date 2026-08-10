@@ -766,6 +766,12 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 						(row) => row.endpoint === endpoint,
 					);
 					if (existing) {
+						// Mirror `WHERE push_subscriptions.user_id = EXCLUDED.user_id`:
+						// a conflicting row owned by another user is left untouched
+						// (0 rows updated), blocking silent cross-account takeover.
+						if (existing.user_id !== userId) {
+							return { success: true, meta: { last_row_id: 0, changes: 0 } };
+						}
 						existing.user_id = userId;
 						existing.platform = "web";
 						existing.keys_p256dh = p256dh;
@@ -797,6 +803,12 @@ class FakeD1PreparedStatement implements D1PreparedStatement {
 						(row) => row.native_token === token,
 					);
 					if (existing) {
+						// Mirror `WHERE push_subscriptions.user_id = EXCLUDED.user_id`:
+						// a conflicting row owned by another user is left untouched
+						// (0 rows updated), blocking silent cross-account takeover.
+						if (existing.user_id !== userId) {
+							return { success: true, meta: { last_row_id: 0, changes: 0 } };
+						}
 						existing.user_id = userId;
 						existing.platform = platform;
 						existing.endpoint = null;

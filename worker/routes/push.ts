@@ -29,6 +29,7 @@ export function registerPushRoutes(app: App) {
 	        keys_auth = EXCLUDED.keys_auth,
 	        native_token = NULL,
 	        apns_environment = NULL
+	      WHERE push_subscriptions.user_id = EXCLUDED.user_id
 	    `,
 			[user.id, endpoint, keys.p256dh, keys.auth],
 		);
@@ -75,6 +76,7 @@ export function registerPushRoutes(app: App) {
 	        keys_p256dh = NULL,
 	        keys_auth = NULL,
 	        apns_environment = EXCLUDED.apns_environment
+	      WHERE push_subscriptions.user_id = EXCLUDED.user_id
 	    `,
 			[
 				user.id,
