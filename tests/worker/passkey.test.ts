@@ -65,4 +65,24 @@ describe("passkeys", () => {
 		assert.equal(json.success, true);
 		assert.equal(db.passkeys.length, 0);
 	});
+
+	it("rejects non-numeric passkey ids", async () => {
+		const { env, db } = createTestEnv();
+		const user = seedUser(db, { username: "BadId" });
+		seedSession(db, user.id, "bad-id-token");
+		seedPasskey(db, { userId: user.id });
+
+		const { res, json } = await jsonRequest(
+			env,
+			"/api/auth/passkey/not-a-number",
+			{
+				method: "DELETE",
+				headers: { "x-session-token": "bad-id-token" },
+			},
+		);
+
+		assert.equal(res.status, 400);
+		assert.equal(json.error, "Invalid id");
+		assert.equal(db.passkeys.length, 1);
+	});
 });
