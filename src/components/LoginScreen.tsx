@@ -19,6 +19,7 @@ import "./EmailLoginScreen.css";
 
 type LoginScreenProps = {
 	onTryPasskey: () => Promise<void>;
+	onAbortAutofill: () => void;
 	onAuthenticated: (user: User, needsPasskeySetup: boolean) => Promise<void>;
 	onChooseUsername: () => void;
 	onEmailLogin: () => void;
@@ -270,6 +271,9 @@ export function LoginScreen(props: LoginScreenProps) {
 	}
 
 	async function handlePasskeyLogin() {
+		// Abort any in-flight conditional mediation request before starting an explicit one.
+		// The browser allows only one pending WebAuthn request at a time.
+		props.onAbortAutofill();
 		const startedAt = logPasskeyStart("login");
 		if (!Capacitor.isNativePlatform() && !window.PublicKeyCredential) {
 			setPasskeyError("Passkeys are not supported on this device");
