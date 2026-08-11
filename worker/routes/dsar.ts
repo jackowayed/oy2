@@ -17,6 +17,15 @@ const allowedTypes: ReadonlySet<DsarRequestType> = new Set([
 	"restrict",
 ]);
 
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
 function buildDsarEmailHtml(input: {
 	user: User;
 	requestType: DsarRequestType;
@@ -33,13 +42,13 @@ function buildDsarEmailHtml(input: {
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 24px; margin: 0;">
   <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 24px;">
     <h1 style="margin: 0 0 16px; font-size: 22px; color: #111;">DSAR Request</h1>
-    <p style="margin: 0 0 8px; color: #333;"><strong>User ID:</strong> ${user.id}</p>
-    <p style="margin: 0 0 8px; color: #333;"><strong>Username:</strong> ${user.username}</p>
-    <p style="margin: 0 0 8px; color: #333;"><strong>Email:</strong> ${user.email ?? "Not set"}</p>
-    <p style="margin: 0 0 8px; color: #333;"><strong>Request Type:</strong> ${requestType}</p>
-    <p style="margin: 0 0 8px; color: #333;"><strong>Jurisdiction:</strong> ${jurisdiction}</p>
+    <p style="margin: 0 0 8px; color: #333;"><strong>User ID:</strong> ${escapeHtml(String(user.id))}</p>
+    <p style="margin: 0 0 8px; color: #333;"><strong>Username:</strong> ${escapeHtml(user.username)}</p>
+    <p style="margin: 0 0 8px; color: #333;"><strong>Email:</strong> ${escapeHtml(user.email ?? "Not set")}</p>
+    <p style="margin: 0 0 8px; color: #333;"><strong>Request Type:</strong> ${escapeHtml(requestType)}</p>
+    <p style="margin: 0 0 8px; color: #333;"><strong>Jurisdiction:</strong> ${escapeHtml(jurisdiction)}</p>
     <p style="margin: 0 0 8px; color: #333;"><strong>Details:</strong></p>
-    <pre style="white-space: pre-wrap; background: #f8fafc; padding: 12px; border-radius: 8px; margin: 0;">${details}</pre>
+    <pre style="white-space: pre-wrap; background: #f8fafc; padding: 12px; border-radius: 8px; margin: 0;">${escapeHtml(details)}</pre>
   </div>
 </body>
 </html>`;
