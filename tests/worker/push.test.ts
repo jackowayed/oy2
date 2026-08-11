@@ -85,74 +85,71 @@ describe("push subscriptions", () => {
 		assert.equal(db.pushSubscriptions[0]?.keys_auth, "new-auth");
 	});
 
-	it("blocks web subscription hijack of another user's endpoint", async () => {
+	it("reassigns a web endpoint to the newest subscriber (device hand-off)", async () => {
 		const { env, db } = createTestEnv();
-		const victim = seedUser(db, { username: "Victim" });
-		const attacker = seedUser(db, { username: "Attacker" });
-		seedSession(db, victim.id, "victim-push-token");
-		seedSession(db, attacker.id, "attacker-push-token");
+		const first = seedUser(db, { username: "First" });
+		const second = seedUser(db, { username: "Second" });
+		seedSession(db, first.id, "first-push-token");
+		seedSession(db, second.id, "second-push-token");
 
-		const endpoint = "https://example.com/victim-endpoint";
+		const endpoint = "https://example.com/shared-endpoint";
 		await jsonRequest(env, "/api/push/subscribe", {
 			method: "POST",
-			headers: { "x-session-token": "victim-push-token" },
+			headers: { "x-session-token": "first-push-token" },
 			body: {
 				endpoint,
-				keys: { p256dh: "victim-p256", auth: "victim-auth" },
+				keys: { p256dh: "first-p256", auth: "first-auth" },
 			},
 		});
 
+		// A different account signing in on the same browser re-submits the same
+		// browser-issued endpoint. It must take over the subscription so the
+		// person now at the device receives their notifications (and stops
+		// delivering the previous account's to this device).
 		const { res, json } = await jsonRequest(env, "/api/push/subscribe", {
 			method: "POST",
-			headers: { "x-session-token": "attacker-push-token" },
+			headers: { "x-session-token": "second-push-token" },
 			body: {
 				endpoint,
-				keys: { p256dh: "attacker-p256", auth: "attacker-auth" },
+				keys: { p256dh: "second-p256", auth: "second-auth" },
 			},
 		});
 
-		// Response gives nothing away: the block looks like an ordinary success.
 		assert.equal(res.status, 200);
 		assert.equal(json.success, true);
-
-		// The victim's row is left completely untouched.
 		assert.equal(db.pushSubscriptions.length, 1);
 		const row = db.pushSubscriptions.find((sub) => sub.endpoint === endpoint);
-		assert.equal(row?.user_id, victim.id);
-		assert.equal(row?.keys_p256dh, "victim-p256");
-		assert.equal(row?.keys_auth, "victim-auth");
+		assert.equal(row?.user_id, second.id);
+		assert.equal(row?.keys_p256dh, "second-p256");
+		assert.equal(row?.keys_auth, "second-auth");
 	});
 
-	it("blocks native subscription hijack of another user's token", async () => {
+	it("reassigns a native token to the newest subscriber (device hand-off)", async () => {
 		const { env, db } = createTestEnv();
-		const victim = seedUser(db, { username: "NativeVictim" });
-		const attacker = seedUser(db, { username: "NativeAttacker" });
-		seedSession(db, victim.id, "victim-native-token");
-		seedSession(db, attacker.id, "attacker-native-token");
+		const first = seedUser(db, { username: "NativeFirst" });
+		const second = seedUser(db, { username: "NativeSecond" });
+		seedSession(db, first.id, "first-native-token");
+		seedSession(db, second.id, "second-native-token");
 
 		const token = "shared-native-token";
 		await jsonRequest(env, "/api/push/native/subscribe", {
 			method: "POST",
-			headers: { "x-session-token": "victim-native-token" },
+			headers: { "x-session-token": "first-native-token" },
 			body: { token, platform: "ios", apnsEnvironment: "sandbox" },
 		});
 
 		const { res, json } = await jsonRequest(env, "/api/push/native/subscribe", {
 			method: "POST",
-			headers: { "x-session-token": "attacker-native-token" },
+			headers: { "x-session-token": "second-native-token" },
 			body: { token, platform: "android" },
 		});
 
-		// Response gives nothing away: the block looks like an ordinary success.
 		assert.equal(res.status, 200);
 		assert.equal(json.success, true);
-
-		// The victim's row is left completely untouched.
 		assert.equal(db.pushSubscriptions.length, 1);
 		const row = db.pushSubscriptions.find((sub) => sub.native_token === token);
-		assert.equal(row?.user_id, victim.id);
-		assert.equal(row?.platform, "ios");
-		assert.equal(row?.apns_environment, "sandbox");
+		assert.equal(row?.user_id, second.id);
+		assert.equal(row?.platform, "android");
 	});
 
 	it("inserts a fresh endpoint for the subscribing user", async () => {

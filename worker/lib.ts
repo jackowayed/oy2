@@ -50,6 +50,18 @@ const delay = (ms: number) =>
 		setTimeout(resolve, ms);
 	});
 
+// A push endpoint URL / native token is a bearer capability: whoever holds it
+// can receive that device's notifications. Never log it verbatim. This derives
+// a stable, non-reversible id so delivery-failure logs can still be correlated.
+function redactPushTarget(value: string): string {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < value.length; i += 1) {
+		hash ^= value.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return `push_${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 function base64UrlEncode(value: Uint8Array) {
 	let binary = "";
 	for (const byte of value) {
@@ -404,9 +416,11 @@ export async function sendPushNotifications(
 
 			if (!result.delivered) {
 				const lastAttempt = result.attempts[result.attempts.length - 1];
+				const rawTarget =
+					sub.platform === "web" ? sub.endpoint : sub.native_token;
 				console.error("Failed to send push", {
 					platform: sub.platform,
-					target: sub.platform === "web" ? sub.endpoint : sub.native_token,
+					target: rawTarget ? redactPushTarget(rawTarget) : null,
 					statusCode: result.statusCode ?? null,
 					lastError: lastAttempt?.errorMessage ?? null,
 					attempts: result.attempts.length,
