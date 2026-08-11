@@ -360,6 +360,17 @@ export function registerOAuthRoutes(app: App) {
 			state,
 		});
 
+		// Bind the flow to this browser: the callback must present a cookie
+		// whose value equals this state. SameSite=None because Apple returns
+		// via a cross-site form_post, which drops Lax/Strict cookies.
+		setCookie(c, "oauth_state", state, {
+			httpOnly: true,
+			secure: true,
+			sameSite: "None",
+			path: "/",
+			maxAge: 600,
+		});
+
 		return c.redirect(
 			`https://appleid.apple.com/auth/authorize?${params.toString()}`,
 		);
@@ -388,6 +399,17 @@ export function registerOAuthRoutes(app: App) {
 			prompt: "select_account",
 		});
 
+		// Bind the flow to this browser: the callback must present a cookie
+		// whose value equals this state. SameSite=None to match the Apple flow
+		// (also survives a cross-site return) so both providers behave alike.
+		setCookie(c, "oauth_state", state, {
+			httpOnly: true,
+			secure: true,
+			sameSite: "None",
+			path: "/",
+			maxAge: 600,
+		});
+
 		return c.redirect(
 			`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
 		);
@@ -404,12 +426,21 @@ export function registerOAuthRoutes(app: App) {
 			return c.redirect("/?error=missing_state");
 		}
 
+		// Bind to the initiating browser: the state must match the per-browser,
+		// server-set cookie planted at initiation. This blocks login CSRF where
+		// an attacker replays a valid state into a victim's browser.
+		const stateCookie = getCookie(c, "oauth_state");
+		if (!stateCookie || stateCookie !== state) {
+			return c.redirect("/?error=invalid_state");
+		}
+
 		// Verify and consume state
 		const stateData = await c.env.OY2.get(`${OAUTH_STATE_PREFIX}${state}`);
 		if (!stateData) {
 			return c.redirect("/?error=invalid_state");
 		}
 		await c.env.OY2.delete(`${OAUTH_STATE_PREFIX}${state}`);
+		deleteCookie(c, "oauth_state", { path: "/" });
 
 		const {
 			provider,
@@ -583,12 +614,21 @@ export function registerOAuthRoutes(app: App) {
 			return c.redirect("/?error=missing_params");
 		}
 
+		// Bind to the initiating browser: the state must match the per-browser,
+		// server-set cookie planted at initiation. This blocks login CSRF where
+		// an attacker replays a valid state into a victim's browser.
+		const stateCookie = getCookie(c, "oauth_state");
+		if (!stateCookie || stateCookie !== state) {
+			return c.redirect("/?error=invalid_state");
+		}
+
 		// Verify and consume state
 		const stateData = await c.env.OY2.get(`${OAUTH_STATE_PREFIX}${state}`);
 		if (!stateData) {
 			return c.redirect("/?error=invalid_state");
 		}
 		await c.env.OY2.delete(`${OAUTH_STATE_PREFIX}${state}`);
+		deleteCookie(c, "oauth_state", { path: "/" });
 
 		const {
 			provider,

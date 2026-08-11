@@ -101,6 +101,7 @@ describe("oauth", () => {
 		const res = await request(
 			env,
 			`/api/auth/oauth/callback?state=${state}&code=auth-code`,
+			{ headers: { cookie: `oauth_state=${state}` } },
 		);
 		assert.equal(res.status, 302);
 		assert.equal(res.headers.get("location"), "/?passkey_setup=1");
@@ -363,6 +364,7 @@ describe("oauth", () => {
 		const res = await request(
 			env,
 			`/api/auth/oauth/callback?state=${state}&code=auth-code`,
+			{ headers: { cookie: `oauth_state=${state}` } },
 		);
 
 		assert.equal(res.status, 302);
@@ -547,5 +549,180 @@ describe("oauth", () => {
 		assert.equal(user.oauth_provider, null);
 		assert.equal(user.oauth_sub, null);
 		assert.equal(db.sessions.length, 0);
+	});
+
+	it("rejects apple form_post callback when the oauth_state cookie is absent", async () => {
+		const { env, kv, db } = createTestEnv();
+		const state = "apple-state-no-cookie";
+		await kv.put(
+			`oauth_state:${state}`,
+			JSON.stringify({ provider: "apple", origin: "http://localhost" }),
+		);
+
+		const res = await request(env, "/api/auth/oauth/callback", {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ state, id_token: "unused" }),
+		});
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?error=invalid_state");
+		assert.equal(getSessionToken(res), null);
+		assert.equal(db.sessions.length, 0);
+		// Browser-binding check fails before the KV state is consumed.
+		assert.ok(await kv.get(`oauth_state:${state}`));
+	});
+
+	it("rejects google form_post callback when the oauth_state cookie is absent", async () => {
+		const { env, kv, db } = createTestEnv();
+		const state = "google-post-state-no-cookie";
+		await kv.put(
+			`oauth_state:${state}`,
+			JSON.stringify({ provider: "google", origin: "http://localhost" }),
+		);
+
+		const res = await request(env, "/api/auth/oauth/callback", {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ state, code: "auth-code" }),
+		});
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?error=invalid_state");
+		assert.equal(getSessionToken(res), null);
+		assert.equal(db.sessions.length, 0);
+		assert.ok(await kv.get(`oauth_state:${state}`));
+	});
+
+	it("rejects form_post callback when the oauth_state cookie does not match", async () => {
+		const { env, kv, db } = createTestEnv();
+		const state = "apple-state-cookie-mismatch";
+		await kv.put(
+			`oauth_state:${state}`,
+			JSON.stringify({ provider: "apple", origin: "http://localhost" }),
+		);
+
+		const res = await request(env, "/api/auth/oauth/callback", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				cookie: "oauth_state=some-other-browser-state",
+			},
+			body: new URLSearchParams({ state, id_token: "unused" }),
+		});
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?error=invalid_state");
+		assert.equal(getSessionToken(res), null);
+		assert.equal(db.sessions.length, 0);
+		assert.ok(await kv.get(`oauth_state:${state}`));
+	});
+
+	it("rejects google GET callback when the oauth_state cookie is absent", async () => {
+		const { env, kv, db } = createTestEnv();
+		const state = "google-get-state-no-cookie";
+		await kv.put(
+			`oauth_state:${state}`,
+			JSON.stringify({ provider: "google", origin: "http://localhost" }),
+		);
+
+		const res = await request(
+			env,
+			`/api/auth/oauth/callback?state=${state}&code=auth-code`,
+		);
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?error=invalid_state");
+		assert.equal(getSessionToken(res), null);
+		assert.equal(db.sessions.length, 0);
+		assert.ok(await kv.get(`oauth_state:${state}`));
+	});
+
+	it("rejects google GET callback when the oauth_state cookie does not match", async () => {
+		const { env, kv, db } = createTestEnv();
+		const state = "google-get-state-mismatch";
+		await kv.put(
+			`oauth_state:${state}`,
+			JSON.stringify({ provider: "google", origin: "http://localhost" }),
+		);
+
+		const res = await request(
+			env,
+			`/api/auth/oauth/callback?state=${state}&code=auth-code`,
+			{ headers: { cookie: "oauth_state=some-other-browser-state" } },
+		);
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?error=invalid_state");
+		assert.equal(getSessionToken(res), null);
+		assert.equal(db.sessions.length, 0);
+		assert.ok(await kv.get(`oauth_state:${state}`));
+	});
+
+	it("completes apple form_post callback when the oauth_state cookie matches", async (t) => {
+		const { env, kv, db } = createTestEnv();
+		const user = seedUser(db, {
+			username: "AppleCallbackUser",
+			oauthProvider: "apple",
+			oauthSub: "apple-callback-sub",
+		});
+
+		const { publicKey, privateKey } = await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"],
+		);
+		const jwk = (await crypto.subtle.exportKey("jwk", publicKey)) as JsonWebKey;
+		jwk.kid = "apple-callback-kid";
+		const idToken = await createAppleIdToken({
+			privateKey,
+			sub: "apple-callback-sub",
+			email: "apple-callback@example.com",
+			aud: env.APPLE_CLIENT_ID,
+			kid: String(jwk.kid),
+		});
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = async (input) => {
+			const url = typeof input === "string" ? input : input.url;
+			if (url === "https://appleid.apple.com/auth/keys") {
+				return {
+					ok: true,
+					json: async () => ({ keys: [jwk] }),
+				} as Response;
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		};
+		t.after(() => {
+			globalThis.fetch = originalFetch;
+		});
+
+		const state = "apple-callback-state";
+		await kv.put(
+			`oauth_state:${state}`,
+			JSON.stringify({ provider: "apple", origin: "http://localhost" }),
+		);
+
+		const res = await request(env, "/api/auth/oauth/callback", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				cookie: `oauth_state=${state}`,
+			},
+			body: new URLSearchParams({ state, id_token: idToken }),
+		});
+
+		assert.equal(res.status, 302);
+		assert.equal(res.headers.get("location"), "/?passkey_setup=1");
+		assert.ok(getSessionToken(res));
+		assert.equal(db.sessions.length, 1);
+		assert.equal(db.sessions[0].user_id, user.id);
+		// Matching state is consumed from KV on success.
+		assert.equal(await kv.get(`oauth_state:${state}`), null);
 	});
 });
