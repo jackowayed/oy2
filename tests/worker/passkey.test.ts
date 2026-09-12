@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { jsonRequest } from "./testHelpers";
+import { jsonRequest, request } from "./testHelpers";
 import { createTestEnv, seedPasskey, seedSession, seedUser } from "./testUtils";
 
 describe("passkeys", () => {
@@ -46,6 +46,37 @@ describe("passkeys", () => {
 		);
 		assert.equal(res.status, 400);
 		assert.equal(json.error, "Invalid credential type");
+	});
+
+	it("ignores spoofed forwarded/origin headers for the webauthn rp id", async () => {
+		const { env } = createTestEnv();
+		const { res, json } = await jsonRequest(
+			env,
+			"/api/auth/passkey/auth/options",
+			{
+				method: "POST",
+				headers: {
+					"x-forwarded-host": "evil.example.com",
+					"x-forwarded-proto": "https",
+					origin: "https://evil.example.com",
+					referer: "https://evil.example.com/login",
+				},
+			},
+		);
+		assert.equal(res.status, 200);
+		// RP id stays pinned to the configured WEBAUTHN_RP_ID, not the spoofed host.
+		assert.equal(json.rpId, "localhost");
+	});
+
+	it("fails closed for passkey auth options when WEBAUTHN_ORIGIN is unset", async () => {
+		const { env } = createTestEnv();
+		env.WEBAUTHN_ORIGIN = "";
+		env.WEBAUTHN_RP_ID = "";
+		const res = await request(env, "/api/auth/passkey/auth/options", {
+			method: "POST",
+		});
+		// Without a pinned origin the handler must not succeed against headers.
+		assert.equal(res.status, 500);
 	});
 
 	it("deletes passkeys owned by the user", async () => {

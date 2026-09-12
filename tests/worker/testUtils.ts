@@ -2128,6 +2128,8 @@ export function createTestEnv() {
 		RESEND_API_KEY: "resend-key",
 		JWT_SECRET: "test-jwt-secret",
 		RP_NAME: "Oy",
+		WEBAUTHN_ORIGIN: "http://localhost",
+		WEBAUTHN_RP_ID: "localhost",
 	};
 	return { env, db, kv };
 }

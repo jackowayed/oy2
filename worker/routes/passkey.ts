@@ -14,36 +14,17 @@ import type { App, AppContext, Passkey, User } from "../types";
 const CHALLENGE_PREFIX = "webauthn_challenge:";
 const loadWebAuthn = () => import("@simplewebauthn/server");
 
-function getOrigin(c: AppContext): string {
-	const forwardedProto = c.req.header("X-Forwarded-Proto");
-	const forwardedHost = c.req.header("X-Forwarded-Host");
-	if (forwardedProto && forwardedHost) {
-		return `${forwardedProto}://${forwardedHost}`;
-	}
-
-	const originHeader = c.req.header("Origin");
-	if (originHeader) {
-		return originHeader;
-	}
-
-	const referer = c.req.header("Referer");
-	if (referer) {
-		return new URL(referer).origin;
-	}
-
-	const url = new URL(c.req.url);
-	return url.origin;
-}
-
 function getExpectedOrigins(c: AppContext): string | string[] {
 	const originEnv = c.env.WEBAUTHN_ORIGIN;
-	if (!originEnv) {
-		return getOrigin(c);
-	}
-	const origins = originEnv
+	const origins = (originEnv ?? "")
 		.split(",")
 		.map((origin) => origin.trim())
 		.filter(Boolean);
+	// Fail closed: never fall back to attacker-settable request headers for the
+	// WebAuthn expected origin. Deployments must pin WEBAUTHN_ORIGIN.
+	if (origins.length === 0) {
+		throw new Error("WEBAUTHN_ORIGIN is not configured");
+	}
 	if (origins.length === 1) {
 		return origins[0];
 	}
